@@ -35,7 +35,10 @@ import qtutils.icons
 from labscript_utils.qtwidgets.elide_label import elide_label
 from labscript_utils.ls_zprocess import ProcessTree, RemoteProcessClient
 from labscript_utils.shared_drive import path_to_local
-from blacs import BLACS_DIR
+try:
+    from blacs import BLACS_DIR
+except ImportError:
+    from blacs.blacs import BLACS_DIR
 
 process_tree = ProcessTree.instance()
 from labscript_utils import dedent
