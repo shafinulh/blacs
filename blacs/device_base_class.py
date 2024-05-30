@@ -770,7 +770,7 @@ if __name__ == '__main__':
 if __name__ == '__main__':
     # Test case!
     
-    from connections import ConnectionTable
+    from labscript_utils.connections import ConnectionTable
     from labscript_utils.qtwidgets.dragdroptab import DragDropTabWidget
     
     class MyTab(DeviceTab):
