@@ -102,7 +102,7 @@ class StateQueue(object):
      
     # this should only happen in the main thread, as my implementation is not thread safe!
     @inmain_decorator(True)   
-    def put(self, allowed_states, queue_state_indefinitely, delete_stale_states, data, priority=0):
+    def put(self, allowed_states, queue_state_indefinitely, delete_stale_states, data, priority=10):
         """Add a state to the queue. Lower number for priority indicates the state will
         be executed before any states with higher numbers for their priority"""
         # State data starts with priority, and then with a unique id that monotonically
@@ -202,7 +202,7 @@ class StateQueue(object):
 # such that sort order coresponds to the order the state was added to the queue:
 get_unique_id = Counter().get
 
-def define_state(allowed_modes,queue_state_indefinitely,delete_stale_states=False):
+def define_state(allowed_modes,queue_state_indefinitely,delete_stale_states=False, priority=10):
     def wrap(function):
         unescaped_name = function.__name__
         escapedname = '_' + function.__name__
@@ -212,7 +212,7 @@ def define_state(allowed_modes,queue_state_indefinitely,delete_stale_states=Fals
         def f(self,*args,**kwargs):
             function.__name__ = escapedname
             #setattr(self,escapedname,function)
-            self.event_queue.put(allowed_modes,queue_state_indefinitely,delete_stale_states,[function,[args,kwargs]])
+            self.event_queue.put(allowed_modes,queue_state_indefinitely,delete_stale_states,[function,[args,kwargs]], priority)
         f.__name__ = unescaped_name
         f._allowed_modes = allowed_modes
         return f        
@@ -303,6 +303,8 @@ class Tab(object):
         # However it must be done after the UI is created!
         self.mode = MODE_MANUAL
         self.state = 'idle'
+
+        self.done_init = False
         
         # Setup the not responding timeout
         self._timeout = QTimer()
@@ -311,6 +313,7 @@ class Tab(object):
                 
         # Launch the mainloop
         self._mainloop_thread = threading.Thread(target = self.mainloop)
+        self._mainloop_thread.name = self._device_name
         self._mainloop_thread.daemon = True
         self._mainloop_thread.start()
                 
@@ -381,7 +384,7 @@ class Tab(object):
     @force_full_buffered_reprogram.setter
     def force_full_buffered_reprogram(self,value):
         self._force_full_buffered_reprogram = bool(value)
-        self._ui.button_clear_smart_programming.setEnabled(not bool(value))
+        # self._ui.button_clear_smart_programming.setEnabled(not bool(value))
     
     @property
     @inmain_decorator(True)
@@ -453,7 +456,7 @@ class Tab(object):
     @mode.setter
     def mode(self,mode):
         self._mode = mode
-        self._update_state_label()
+        # self._update_state_label()
         
     @property
     def state(self):
@@ -463,7 +466,7 @@ class Tab(object):
     def state(self,state):
         self._state = state        
         self._time_of_last_state_change = time.time()
-        self._update_state_label()
+        # self._update_state_label()
         self._update_error_and_tab_icon()
     
     @inmain_decorator(True)
@@ -538,7 +541,7 @@ class Tab(object):
         if self.error_message:
             raise Exception('Device failed to initialise')
                
-    @define_state(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL,True)  
+    @define_state(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL,True, False, 1)  
     def _timeout_add(self,delay,execute_timeout):
         QTimer.singleShot(delay,execute_timeout)
     
@@ -783,68 +786,147 @@ class Tab(object):
                 # Run the task with the GUI lock, catching any exceptions:
                 #func = getattr(self,funcname)
                 # run the function in the Qt main thread
-                generator = inmain(func,self,*args,**kwargs)
+                generator = None
+                if self.device_name == 'ni_6363':
+                    generator = func(self,*args,**kwargs)
+                else:
+                    generator = inmain(func,self,*args,**kwargs)
                 # Do any work that was queued up:(we only talk to the worker if work has been queued up through the yield command)
                 if type(generator) == GeneratorType:
                     # We need to call next recursively, queue up work and send the results back until we get a StopIteration exception
                     generator_running = True
                     # get the data from the first yield function
-                    worker_process,worker_function,worker_args,worker_kwargs = inmain(generator.__next__)
-                    # Continue until we get a StopIteration exception, or the user requests a restart
-                    while generator_running:
-                        try:
-                            logger.debug('Instructing worker %s to do job %s'%(worker_process,worker_function) )
-                            if worker_function == 'init':
-                                # Start the worker process before running its init() method:
-                                self.state = '%s (%s)'%('Starting worker process', worker_process)
-                                worker, _, _ = self.workers[worker_process]
-                                to_worker, from_worker = worker.start(*worker_args)
-                                self.workers[worker_process] = (worker, to_worker, from_worker)
-                                worker_args = ()
-                                del worker # Do not gold a reference indefinitely
-                            worker_arg_list = (worker_function,worker_args,worker_kwargs)
-                            # This line is to catch if you try to pass unpickleable objects.
+                    if self.device_name == 'ni_6363':
+                        tasks = generator.__next__()
+                        # Continue until we get a StopIteration exception, or the user requests a restart
+                        while generator_running:
                             try:
-                                pickle.dumps(worker_arg_list)
-                            except Exception:
-                                self.error_message += 'Attempt to pass unserialisable object to child process:'
-                                raise
-                            # Send the command to the worker
-                            to_worker = workers[worker_process][1]
-                            from_worker = workers[worker_process][2]
-                            to_worker.put(worker_arg_list)
-                            self.state = '%s (%s)'%(worker_function,worker_process)
-                            # Confirm that the worker got the message:
-                            logger.debug('Waiting for worker to acknowledge job request')
-                            success, message, results = from_worker.get()
-                            if not success:
-                                logger.info('Worker reported failure to start job')
-                                raise Exception(message)
-                            # Wait for and get the results of the work:
-                            logger.debug('Worker reported job started, waiting for completion')
-                            success,message,results = from_worker.get()
-                            if not success:
-                                logger.info('Worker reported exception during job')
-                                now = time.strftime('%a %b %d, %H:%M:%S ',time.localtime())
-                                self.error_message += ('Exception in worker - %s:<br />' % now +
-                                               '<FONT COLOR=\'#ff0000\'>%s</FONT><br />'%escape(message).replace(' ','&nbsp;').replace('\n','<br />'))
-                            else:
-                                logger.debug('Job completed')
-                            
-                            # Reset the hide_not_responding_error_until, since we have now heard from the child                        
-                            self.hide_not_responding_error_until = 0
+                                logger = logging.getLogger('Inside the ni device specific state task executor')
+                                results_list = []
+                                wrapped_tasks = []
+                                if isinstance(tasks, tuple):
+                                    wrapped_tasks.append(tasks)
+                                else:
+                                    wrapped_tasks = tasks
+                                for task in wrapped_tasks:
+                                    worker_process, worker_function, worker_args, worker_kwargs = task
+                                    logger.debug('Instructing worker %s to do job %s'%(worker_process,worker_function) )
+                                    if worker_function == 'init':
+                                        # Start the worker process before running its init() method:
+                                        self.state = '%s (%s)'%('Starting worker process', worker_process)
+                                        worker, _, _ = self.workers[worker_process]
+                                        to_worker, from_worker = worker.start(*worker_args)
+                                        self.workers[worker_process] = (worker, to_worker, from_worker)
+                                        worker_args = ()
+                                        del worker # Do not gold a reference indefinitely
+                                    worker_arg_list = (worker_function,worker_args,worker_kwargs)
+                                    # This line is to catch if you try to pass unpickleable objects.
+                                    try:
+                                        pickle.dumps(worker_arg_list)
+                                    except Exception:
+                                        self.error_message += 'Attempt to pass unserialisable object to child process:'
+                                        raise
+                                    # Send the command to the worker
+                                    to_worker = workers[worker_process][1]
+                                    from_worker = workers[worker_process][2]
+                                    to_worker.put(worker_arg_list)
+                                    self.state = '%s (%s)'%(worker_function,worker_process)
+                                    # Confirm that the worker got the message:
+                                    logger.debug('Waiting for worker to acknowledge job request')
+                                    success, message, results = from_worker.get()
+                                    if not success:
+                                        logger.info('Worker reported failure to start job')
+                                        raise Exception(message)
+                                    
+                                    results_list.append((worker_process, from_worker))
+
+                                overall_success = True
+                                for worker_process, from_worker in results_list:
+                                    logger.debug('Waiting for completion of job from worker %s' % worker_process)
+                                    success, message, result = from_worker.get()
+                                    if not success:
+                                        logger.info('Worker reported exception during job')
+                                        now = time.strftime('%a %b %d, %H:%M:%S ',time.localtime())
+                                        self.error_message += ('Exception in worker - %s:<br />' % now +
+                                                    '<FONT COLOR=\'#ff0000\'>%s</FONT><br />'%escape(message).replace(' ','&nbsp;').replace('\n','<br />'))
+                                        overall_success = False
+                                        break
+                                    else:
+                                        logger.debug('Job completed for worker %s' % worker_process)
+                                    
+                                # Reset the hide_not_responding_error_until, since we have now heard from the child                        
+                                self.hide_not_responding_error_until = 0
+                                    
+                                # Send the results back to the GUI function
+                                logger.debug('returning worker results to function %s' % func.__name__)
+                                self.state = '%s (GUI)'%func.__name__
+                                next_yield = None
+                                next_yield = generator.send(overall_success)
+                            except StopIteration:
+                                # The generator has finished. Ignore the error, but stop the loop
+                                logger.debug('Finalising function')
+                                generator_running = False
+                    else:
+                        worker_process,worker_function,worker_args,worker_kwargs = inmain(generator.__next__)
+                        # Continue until we get a StopIteration exception, or the user requests a restart
+                        while generator_running:
+                            try:
+                                logger.debug('Instructing worker %s to do job %s'%(worker_process,worker_function) )
+                                if worker_function == 'init':
+                                    # Start the worker process before running its init() method:
+                                    self.state = '%s (%s)'%('Starting worker process', worker_process)
+                                    worker, _, _ = self.workers[worker_process]
+                                    to_worker, from_worker = worker.start(*worker_args)
+                                    self.workers[worker_process] = (worker, to_worker, from_worker)
+                                    worker_args = ()
+                                    del worker # Do not gold a reference indefinitely
+                                worker_arg_list = (worker_function,worker_args,worker_kwargs)
+                                # This line is to catch if you try to pass unpickleable objects.
+                                try:
+                                    pickle.dumps(worker_arg_list)
+                                except Exception:
+                                    self.error_message += 'Attempt to pass unserialisable object to child process:'
+                                    raise
+                                # Send the command to the worker
+                                to_worker = workers[worker_process][1]
+                                from_worker = workers[worker_process][2]
+                                to_worker.put(worker_arg_list)
+                                self.state = '%s (%s)'%(worker_function,worker_process)
+                                # Confirm that the worker got the message:
+                                logger.debug('Waiting for worker to acknowledge job request')
+                                success, message, results = from_worker.get()
+                                if not success:
+                                    logger.info('Worker reported failure to start job')
+                                    raise Exception(message)
+                                # Wait for and get the results of the work:
+                                logger.debug('Worker reported job started, waiting for completion')
+                                success,message,results = from_worker.get()
+                                if not success:
+                                    logger.info('Worker reported exception during job')
+                                    now = time.strftime('%a %b %d, %H:%M:%S ',time.localtime())
+                                    self.error_message += ('Exception in worker - %s:<br />' % now +
+                                                '<FONT COLOR=\'#ff0000\'>%s</FONT><br />'%escape(message).replace(' ','&nbsp;').replace('\n','<br />'))
+                                else:
+                                    logger.debug('Job completed')
                                 
-                            # Send the results back to the GUI function
-                            logger.debug('returning worker results to function %s' % func.__name__)
-                            self.state = '%s (GUI)'%func.__name__
-                            next_yield = inmain(generator.send,results) 
-                            # If there is another yield command, put the data in the required variables for the next loop iteration
-                            if next_yield:
-                                worker_process,worker_function,worker_args,worker_kwargs = next_yield
-                        except StopIteration:
-                            # The generator has finished. Ignore the error, but stop the loop
-                            logger.debug('Finalising function')
-                            generator_running = False
+                                # Reset the hide_not_responding_error_until, since we have now heard from the child                        
+                                self.hide_not_responding_error_until = 0
+                                    
+                                # Send the results back to the GUI function
+                                logger.debug('returning worker results to function %s' % func.__name__)
+                                self.state = '%s (GUI)'%func.__name__
+                                next_yield = None
+                                if self.device_name == 'ni_6363':
+                                    next_yield = generator.send(results)
+                                else:
+                                    next_yield = inmain(generator.send,results) 
+                                # If there is another yield command, put the data in the required variables for the next loop iteration
+                                if next_yield:
+                                    worker_process,worker_function,worker_args,worker_kwargs = next_yield
+                            except StopIteration:
+                                # The generator has finished. Ignore the error, but stop the loop
+                                logger.debug('Finalising function')
+                                generator_running = False
                 self.state = 'idle'
         except Interrupted:
             # User requested a restart

@@ -401,30 +401,37 @@ class DeviceTab(Tab):
         self._last_programmed_values = self.get_front_panel_values()
         
         # get rid of any "remote values changed" dialog
-        self._changed_widget.hide()
-        
-        results = yield(self.queue_work(self._primary_worker,'program_manual',self._last_programmed_values))
-        for worker in self._secondary_workers:
-            if results:
-                returned_results = yield(self.queue_work(worker,'program_manual',self._last_programmed_values))
-                results.update(returned_results)
-        
-        # If the worker process returns something, we assume it wants us to coerce the front panel values
-        if results:
-            for channel,remote_value in results.items():
-                if channel not in self._last_programmed_values:
-                    raise RuntimeError('The worker function program_manual for device %s is returning data for channel %s but the BLACS tab is not programmed to handle this channel'%(self.device_name,channel))
-                
-                output = self.get_channel(channel)
-                if output is None:
-                    raise RuntimeError('The channel %s on device %s is in the last programmed values, but is not in the AO, DO or DDS output store. Something has gone badly wrong!'%(channel,self.device_name))
-                else:                    
-                    # TODO: Only do this if the front panel values match what we asked to program (eg, the user hasn't changed the value since)
-                    if output.value == self._last_programmed_values[channel]:
-                        output.set_value(remote_value,program=False)
+        # self._changed_widget.hide()
+
+        if self.device_name == 'ni_6363':
+            tasks = []
+            tasks.append(self.queue_work(self._primary_worker,'program_manual',self._last_programmed_values))
+            for worker in self._secondary_workers:
+                tasks.append(self.queue_work(worker,'program_manual',self._last_programmed_values))
+            yield(tasks)
+        else: 
+            results = yield(self.queue_work(self._primary_worker,'program_manual',self._last_programmed_values))
+            for worker in self._secondary_workers:
+                if results:
+                    returned_results = yield(self.queue_work(worker,'program_manual',self._last_programmed_values))
+                    results.update(returned_results)
             
-                        # Update the last_programmed_values            
-                        self._last_programmed_values[channel] = remote_value
+            # If the worker process returns something, we assume it wants us to coerce the front panel values
+            if results:
+                for channel,remote_value in results.items():
+                    if channel not in self._last_programmed_values:
+                        raise RuntimeError('The worker function program_manual for device %s is returning data for channel %s but the BLACS tab is not programmed to handle this channel'%(self.device_name,channel))
+                    
+                    output = self.get_channel(channel)
+                    if output is None:
+                        raise RuntimeError('The channel %s on device %s is in the last programmed values, but is not in the AO, DO or DDS output store. Something has gone badly wrong!'%(channel,self.device_name))
+                    else:                    
+                        # TODO: Only do this if the front panel values match what we asked to program (eg, the user hasn't changed the value since)
+                        if output.value == self._last_programmed_values[channel]:
+                            output.set_value(remote_value,program=False)
+                
+                            # Update the last_programmed_values            
+                            self._last_programmed_values[channel] = remote_value
     
     @define_state(MODE_MANUAL,True)
     def check_remote_values(self):
@@ -582,37 +589,65 @@ class DeviceTab(Tab):
     
     @define_state(MODE_MANUAL,True)
     def transition_to_buffered(self,h5_file,notify_queue): 
-        # Get rid of any "remote values changed" dialog
-        self._changed_widget.hide()
-    
         self.mode = MODE_TRANSITION_TO_BUFFERED
-        
-        h5_file = path_to_agnostic(h5_file)
-        # transition_to_buffered returns the final values of the run, to update the GUI with at the end of the run:
-        transitioned_called = [self._primary_worker]
-        front_panel_values = self.get_front_panel_values()
-        self._final_values = yield(self.queue_work(self._primary_worker,'_transition_to_buffered',self.device_name,h5_file,front_panel_values,self._force_full_buffered_reprogram))
-        if self._final_values is not None:
+        '''
+        testing out mock implementation of parallelized workers
+        '''
+        if self.device_name == 'ni_6363':
+            h5_file = path_to_agnostic(h5_file)
+            transitioned_called = [self._primary_worker]
+            front_panel_values = None
+
+            tasks = []
+
+            tasks.append(self.queue_work(self._primary_worker,'_transition_to_buffered',self.device_name,h5_file,front_panel_values,self._force_full_buffered_reprogram))
             for worker in self._secondary_workers:
                 transitioned_called.append(worker)
-                extra_final_values = yield(self.queue_work(worker,'_transition_to_buffered',self.device_name,h5_file,front_panel_values,self.force_full_buffered_reprogram))
-                if extra_final_values is not None:
-                    self._final_values.update(extra_final_values)
-                else:
-                    self._final_values = None
-                    break
-        
-        # If we get None back, then the worker process did not finish properly
-        if self._final_values is None:
-            notify_queue.put([self.device_name,'fail'])
-            self.abort_transition_to_buffered(transitioned_called)
+                tasks.append(self.queue_work(worker,'_transition_to_buffered',self.device_name,h5_file,front_panel_values,self.force_full_buffered_reprogram))
+
+            success = yield(tasks)
+
+            if success:
+                if self._supports_smart_programming:
+                    self.force_full_buffered_reprogram = False
+                    self._ui.button_clear_smart_programming.setEnabled(True)
+                # Tell the queue manager that we're done:
+                self.mode = MODE_BUFFERED
+                notify_queue.put([self.device_name,'success'])
+            else:
+                notify_queue.put([self.device_name,'fail'])
+                self.abort_transition_to_buffered(transitioned_called)
         else:
-            if self._supports_smart_programming:
-                self.force_full_buffered_reprogram = False
-                self._ui.button_clear_smart_programming.setEnabled(True)
-            # Tell the queue manager that we're done:
-            self.mode = MODE_BUFFERED
-            notify_queue.put([self.device_name,'success'])
+            # Get rid of any "remote values changed" dialog
+            # self._changed_widget.hide()
+
+            h5_file = path_to_agnostic(h5_file)
+            # transition_to_buffered returns the final values of the run, to update the GUI with at the end of the run:
+            transitioned_called = [self._primary_worker]
+            front_panel_values = self.get_front_panel_values()
+            # front_panel_values = None
+            self._final_values = yield(self.queue_work(self._primary_worker,'_transition_to_buffered',self.device_name,h5_file,front_panel_values,self._force_full_buffered_reprogram))
+            if self._final_values is not None:
+                for worker in self._secondary_workers:
+                    transitioned_called.append(worker)
+                    extra_final_values = yield(self.queue_work(worker,'_transition_to_buffered',self.device_name,h5_file,front_panel_values,self.force_full_buffered_reprogram))
+                    if extra_final_values is not None:
+                        self._final_values.update(extra_final_values)
+                    else:
+                        self._final_values = None
+                        break
+            
+            # If we get None back, then the worker process did not finish properly
+            if self._final_values is None:
+                notify_queue.put([self.device_name,'fail'])
+                self.abort_transition_to_buffered(transitioned_called)
+            else:
+                if self._supports_smart_programming:
+                    self.force_full_buffered_reprogram = False
+                    self._ui.button_clear_smart_programming.setEnabled(True)
+                # Tell the queue manager that we're done:
+                self.mode = MODE_BUFFERED
+                notify_queue.put([self.device_name,'success'])
        
     @define_state(MODE_TRANSITION_TO_BUFFERED,False)
     def abort_transition_to_buffered(self,workers=None):
@@ -653,37 +688,57 @@ class DeviceTab(Tab):
     def transition_to_manual(self,notify_queue,program=False):
         self.mode = MODE_TRANSITION_TO_MANUAL
         
-        success = yield(self.queue_work(self._primary_worker,'transition_to_manual'))
-        for worker in self._secondary_workers:
-            transition_success = yield(self.queue_work(worker,'transition_to_manual'))
-            if not transition_success:
-                success = False
-                # don't break here, so that as much of the device is returned to normal
-        
-        # Update the GUI with the final values of the run:
-        for channel, value in self._final_values.items():
-            if channel in self._AO:
-                self._AO[channel].set_value(value,program=False)
-            elif channel in self._DO:
-                self._DO[channel].set_value(value,program=False)
-            elif channel in self._image:
-                self._image[channel].set_value(value,program=False)
-            elif channel in self._DDS:
-                self._DDS[channel].set_value(value,program=False)
-        
-        
+        if self.device_name == 'ni_6363':
+            tasks = []
+
+            tasks.append(self.queue_work(self._primary_worker,'transition_to_manual'))
+            for worker in self._secondary_workers:
+                tasks.append(self.queue_work(worker,'transition_to_manual'))
             
-        if success:
-            notify_queue.put([self.device_name,'success'])
-            self.mode = MODE_MANUAL
-        else:
-            notify_queue.put([self.device_name,'fail'])
-            raise Exception('Could not transition to manual. You must restart this device to continue')
+            success = yield(tasks)
+
+            if success:
+                notify_queue.put([self.device_name,'success'])
+                self.mode = MODE_MANUAL
+            else:
+                notify_queue.put([self.device_name,'fail'])
+                raise Exception('Could not transition to manual. You must restart this device to continue')
+                
+            if program:
+                self.program_device()
+            # else:
+            #     self._last_programmed_values = self.get_front_panel_values()
+
+        else:  
+            success = yield(self.queue_work(self._primary_worker,'transition_to_manual'))
+            for worker in self._secondary_workers:
+                transition_success = yield(self.queue_work(worker,'transition_to_manual'))
+                if not transition_success:
+                    success = False
+                    # don't break here, so that as much of the device is returned to normal
             
-        if program:
-            self.program_device()
-        else:
-            self._last_programmed_values = self.get_front_panel_values()
+            # Update the GUI with the final values of the run:
+            # for channel, value in self._final_values.items():
+            #     if channel in self._AO:
+            #         self._AO[channel].set_value(value,program=False)
+            #     elif channel in self._DO:
+            #         self._DO[channel].set_value(value,program=False)
+            #     elif channel in self._image:
+            #         self._image[channel].set_value(value,program=False)
+            #     elif channel in self._DDS:
+            #         self._DDS[channel].set_value(value,program=False)
+            
+            if success:
+                notify_queue.put([self.device_name,'success'])
+                self.mode = MODE_MANUAL
+            else:
+                notify_queue.put([self.device_name,'fail'])
+                raise Exception('Could not transition to manual. You must restart this device to continue')
+                
+            if program:
+                self.program_device()
+            # else:
+            #     self._last_programmed_values = self.get_front_panel_values()
             
 class DeviceWorker(Worker):
     def init(self):
