@@ -23,7 +23,10 @@ from qtutils.qt.QtWidgets import *
 import labscript_utils.excepthook
 from qtutils import UiLoader
 
-from blacs import BLACS_DIR
+try:
+    from blacs import BLACS_DIR
+except ImportError:
+    from blacs.blacs import BLACS_DIR
 from blacs.tab_base_classes import Tab, Worker, define_state
 from blacs.tab_base_classes import MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL, MODE_BUFFERED
 from blacs.output_classes import AO, DO, DDS, Image
