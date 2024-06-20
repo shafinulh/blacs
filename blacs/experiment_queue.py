@@ -855,16 +855,18 @@ class QueueManager(object):
         
                 error_condition = False
                 response_list = {}
-                # Keep transitioning tabs to manual mode and waiting on them until they
-                # are all done or have all errored/restarted/failed. If one fails, we
+                # Keep executing post_experiment state of each tab and waiting on them until
+                # they are all done or have all errored/restarted/failed. If one fails, we
                 # still have to transition the rest to manual mode:
+                # After the post_experiment state has been executed, implicitly transition to 
+                # manual if necessary 
                 while stop_groups:
                     transition_list = {}
                     # Transition the next group to manual mode:
                     for name in stop_groups.pop(min(stop_groups)):
                         tab = devices_in_use[name]
                         try:
-                            tab.transition_to_manual(self.current_queue)
+                            tab.post_experiment(self.current_queue)
                             transition_list[name] = tab
                         except Exception:
                             logger.exception('Exception while transitioning %s to manual mode.'%(name))

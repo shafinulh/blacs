@@ -669,9 +669,7 @@ class DeviceTab(Tab):
                 self._image[channel].set_value(value,program=False)
             elif channel in self._DDS:
                 self._DDS[channel].set_value(value,program=False)
-        
-        
-            
+
         if success:
             notify_queue.put([self.device_name,'success'])
             self.mode = MODE_MANUAL
@@ -683,7 +681,34 @@ class DeviceTab(Tab):
             self.program_device()
         else:
             self._last_programmed_values = self.get_front_panel_values()
-            
+
+    # Post Experiment State has no GUI updates. This is critical for the skip_manual flow
+    @define_state(MODE_BUFFERED,False)
+    def post_experiment(self,notify_queue,program=False,skip_manual=False):
+        self.mode = MODE_BUFFERED
+        
+        success = yield(self.queue_work(self._primary_worker,'post_experiment'))
+        for worker in self._secondary_workers:
+            transition_success = yield(self.queue_work(worker,'post_experiment'))
+            if not transition_success:
+                success = False
+                # don't break here, so that as much of the device is returned to normal
+        if not skip_manual:
+            if success:
+                self.transition_to_manual(notify_queue,program)
+            else:
+                notify_queue.put([self.device_name,'fail'])
+                raise Exception('Could not process post experiment. You must restart this device to continue')
+        else:
+            if success:
+                notify_queue.put([self.device_name,'success'])
+                # We are not actually in manual mode but it is safe to carry out
+                # any states associated with MODE_MANUAL.
+                self.mode = MODE_MANUAL
+            else:
+                notify_queue.put([self.device_name,'fail'])
+                raise Exception('Could not process post experiment. You must restart this device to continue')
+
 class DeviceWorker(Worker):
     def init(self):
         # You read correctly, this isn't __init__, it's init. It's the
