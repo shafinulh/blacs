@@ -81,27 +81,32 @@ class StateQueue(object):
         
         self.list_of_states = []
         self._last_requested_state = None
+
+        self._lock = threading.Lock()
+        self._list_of_states_lock = threading.Lock()
+        self.qt_mainloop_instantiated = False
         # A queue that blocks the get(requested_state) method until an entry in the queue has a state that matches the requested_state
         self.get_blocking_queue = queue.Queue()
 
-    @property
-    @inmain_decorator(True)    
-    # This is always done in main so that we avoid a race condition between the get method and
-    # the put method accessing this property
-    def last_requested_state(self):
-        return self._last_requested_state
-    
-    @last_requested_state.setter
     @inmain_decorator(True)
+    def queue_inmain(self):
+        self.qt_mainloop_instantiated = True
+
+    @property
+    def last_requested_state(self):
+        with self._lock:
+            return self._last_requested_state
+
+    @last_requested_state.setter
     def last_requested_state(self, value):
-        self._last_requested_state = value
+        with self._lock:
+            self._last_requested_state = value
      
     def log_current_states(self):
         if self.logging_enabled:
-            self.logger.debug('Current items in the state queue: %s'%str(self.list_of_states))
+            with self._list_of_states_lock:
+                self.logger.debug('Current items in the state queue: %s'%str(self.list_of_states))
      
-    # this should only happen in the main thread, as my implementation is not thread safe!
-    @inmain_decorator(True)   
     def put(self, allowed_states, queue_state_indefinitely, delete_stale_states, data, priority=0):
         """Add a state to the queue. Lower number for priority indicates the state will
         be executed before any states with higher numbers for their priority"""
@@ -110,9 +115,10 @@ class StateQueue(object):
         # order added.
         state_data = [priority, get_unique_id(), allowed_states, queue_state_indefinitely, delete_stale_states,data]
         # Insert the task into the queue, retaining sort order first by priority and then by order added:
-        insort(self.list_of_states, state_data)
+        with self._list_of_states_lock:
+            insort(self.list_of_states, state_data)
         # if this state is one the get command is waiting for, notify it!
-        if self.last_requested_state is not None and allowed_states&self.last_requested_state:
+        if self.last_requested_state is not None and (allowed_states & self.last_requested_state):
             self.get_blocking_queue.put('new item')
         
         if self.logging_enabled:
@@ -120,8 +126,6 @@ class StateQueue(object):
                 self.logger.debug('New state queued up. Allowed modes: %d, queue state indefinitely: %s, delete stale states: %s, function: %s'%(allowed_states,str(queue_state_indefinitely),str(delete_stale_states),data[0].__name__))
         self.log_current_states()
     
-    # this should only happen in the main thread, as my implementation is not thread safe!
-    @inmain_decorator(True)
     def check_for_next_item(self,state):
         # We reset the queue here, as we are about to traverse the tree, which contains any new items that
         # are described in messages in this queue, so let's not keep those messages around anymore.
@@ -134,42 +138,43 @@ class StateQueue(object):
         # traverse the list
         delete_index_list = []
         success = False
-        for i,item in enumerate(self.list_of_states):
-            priority, unique_id, allowed_states, queue_state_indefinitely, delete_stale_states, data = item
-            if self.logging_enabled:
-                self.logger.debug('iterating over states in queue')
-            if allowed_states&state:
-                # We have found one! Remove it from the list
-                delete_index_list.append(i)
-                
+        with self._list_of_states_lock:
+            for i,item in enumerate(self.list_of_states):
+                priority, unique_id, allowed_states, queue_state_indefinitely, delete_stale_states, data = item
                 if self.logging_enabled:
-                    self.logger.debug('requested state found in queue')
-                
-                # If we are to delete stale states, see if the next state is the same statefunction.
-                # If it is, use that one, or whichever is the latest entry without encountering a different statefunction,
-                # and delete the rest
-                if delete_stale_states:
-                    state_function = data[0]
-                    i+=1
-                    while i < len(self.list_of_states) and state_function == self.list_of_states[i][5][0]:
-                        if self.logging_enabled:
-                            self.logger.debug('requesting deletion of stale state')
-                        priority, unique_id, allowed_states, queue_state_indefinitely, delete_stale_states, data = self.list_of_states[i]
-                        delete_index_list.append(i)
+                    self.logger.debug('iterating over states in queue')
+                if allowed_states&state:
+                    # We have found one! Remove it from the list
+                    delete_index_list.append(i)
+                    
+                    if self.logging_enabled:
+                        self.logger.debug('requested state found in queue')
+                    
+                    # If we are to delete stale states, see if the next state is the same statefunction.
+                    # If it is, use that one, or whichever is the latest entry without encountering a different statefunction,
+                    # and delete the rest
+                    if delete_stale_states:
+                        state_function = data[0]
                         i+=1
-                
-                success = True
-                break
-            elif not queue_state_indefinitely:
+                        while i < len(self.list_of_states) and state_function == self.list_of_states[i][5][0]:
+                            if self.logging_enabled:
+                                self.logger.debug('requesting deletion of stale state')
+                            priority, unique_id, allowed_states, queue_state_indefinitely, delete_stale_states, data = self.list_of_states[i]
+                            delete_index_list.append(i)
+                            i+=1
+                    
+                    success = True
+                    break
+                elif not queue_state_indefinitely:
+                    if self.logging_enabled:
+                        self.logger.debug('state should not be queued indefinitely')
+                    delete_index_list.append(i)
+            
+            # do this in reverse order so that the first delete operation doesn't mess up the indices of subsequent ones
+            for index in reversed(sorted(delete_index_list)):
                 if self.logging_enabled:
-                    self.logger.debug('state should not be queued indefinitely')
-                delete_index_list.append(i)
-        
-        # do this in reverse order so that the first delete operation doesn't mess up the indices of subsequent ones
-        for index in reversed(sorted(delete_index_list)):
-            if self.logging_enabled:
-                self.logger.debug('deleting state')
-            del self.list_of_states[index]
+                    self.logger.debug('deleting state')
+                del self.list_of_states[index]
             
         if not success:
             data = None
@@ -185,10 +190,14 @@ class StateQueue(object):
             raise Exception('You have multiple threads trying to get from this queue at the same time. I won\'t allow it!')
     
         self.last_requested_state = state
+        # TODO: put in a more visible spot
+        if not self.qt_mainloop_instantiated:
+            self.queue_inmain()
+            self.qt_mainloop_instantiated = True
         while True:
             if self.logging_enabled:
                 self.logger.debug('requesting next item in queue with mode %d'%state)
-                inmain(self.log_current_states)
+                self.log_current_states
             status,data = self.check_for_next_item(state)
             if not status:
                 # we didn't find anything useful, so we'll wait until a useful state is added!

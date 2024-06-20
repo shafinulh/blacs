@@ -688,7 +688,7 @@ class DeviceTab(Tab):
 
     # Post Experiment State has no GUI updates. This is critical for the skip_manual flow
     @define_state(MODE_BUFFERED,False)
-    def post_experiment(self,notify_queue,program=False,skip_manual=True):
+    def post_experiment(self,notify_queue,program=False,skip_manual=False):
         self.mode = MODE_BUFFERED
         
         success = yield(self.queue_work(self._primary_worker,'post_experiment'))
