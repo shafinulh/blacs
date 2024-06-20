@@ -23,6 +23,8 @@ from qtutils.qt.QtWidgets import *
 import labscript_utils.excepthook
 from qtutils import UiLoader
 
+from qtutils import qtlock
+
 try:
     from blacs import BLACS_DIR
 except ImportError:
@@ -400,7 +402,7 @@ class DeviceTab(Tab):
         self._last_programmed_values = self.get_front_panel_values()
         
         # get rid of any "remote values changed" dialog
-        self._changed_widget.hide()
+        # self._changed_widget.hide()
         
         results = yield(self.queue_work(self._primary_worker,'program_manual',self._last_programmed_values))
         for worker in self._secondary_workers:
@@ -573,7 +575,7 @@ class DeviceTab(Tab):
             # to match the remote values
             self._last_programmed_values = self.get_front_panel_values()
             
-        self._changed_widget.hide()
+        # self._changed_widget.hide()
     
     @define_state(MODE_BUFFERED,True)
     def start_run(self,notify_queue):
@@ -582,7 +584,7 @@ class DeviceTab(Tab):
     @define_state(MODE_MANUAL,True)
     def transition_to_buffered(self,h5_file,notify_queue): 
         # Get rid of any "remote values changed" dialog
-        self._changed_widget.hide()
+        # self._changed_widget.hide()
     
         self.mode = MODE_TRANSITION_TO_BUFFERED
         
@@ -608,7 +610,8 @@ class DeviceTab(Tab):
         else:
             if self._supports_smart_programming:
                 self.force_full_buffered_reprogram = False
-                self._ui.button_clear_smart_programming.setEnabled(True)
+                with qtlock:
+                    self._ui.button_clear_smart_programming.setEnabled(True)
             # Tell the queue manager that we're done:
             self.mode = MODE_BUFFERED
             notify_queue.put([self.device_name,'success'])
@@ -660,15 +663,16 @@ class DeviceTab(Tab):
                 # don't break here, so that as much of the device is returned to normal
         
         # Update the GUI with the final values of the run:
-        for channel, value in self._final_values.items():
-            if channel in self._AO:
-                self._AO[channel].set_value(value,program=False)
-            elif channel in self._DO:
-                self._DO[channel].set_value(value,program=False)
-            elif channel in self._image:
-                self._image[channel].set_value(value,program=False)
-            elif channel in self._DDS:
-                self._DDS[channel].set_value(value,program=False)
+        with qtlock:
+            for channel, value in self._final_values.items():
+                if channel in self._AO:
+                    self._AO[channel].set_value(value,program=False)
+                elif channel in self._DO:
+                    self._DO[channel].set_value(value,program=False)
+                elif channel in self._image:
+                    self._image[channel].set_value(value,program=False)
+                elif channel in self._DDS:
+                    self._DDS[channel].set_value(value,program=False)
 
         if success:
             notify_queue.put([self.device_name,'success'])
@@ -684,7 +688,7 @@ class DeviceTab(Tab):
 
     # Post Experiment State has no GUI updates. This is critical for the skip_manual flow
     @define_state(MODE_BUFFERED,False)
-    def post_experiment(self,notify_queue,program=False,skip_manual=False):
+    def post_experiment(self,notify_queue,program=False,skip_manual=True):
         self.mode = MODE_BUFFERED
         
         success = yield(self.queue_work(self._primary_worker,'post_experiment'))

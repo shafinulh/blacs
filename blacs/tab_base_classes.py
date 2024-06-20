@@ -75,7 +75,7 @@ class StateQueue(object):
     
     def __init__(self,device_name):
         self.logger = logging.getLogger('BLACS.%s.state_queue'%(device_name))
-        self.logging_enabled = False
+        self.logging_enabled = True
         if self.logging_enabled:
             self.logger.debug("started")
         
@@ -381,7 +381,8 @@ class Tab(object):
     @force_full_buffered_reprogram.setter
     def force_full_buffered_reprogram(self,value):
         self._force_full_buffered_reprogram = bool(value)
-        self._ui.button_clear_smart_programming.setEnabled(not bool(value))
+        with qtlock:
+            self._ui.button_clear_smart_programming.setEnabled(not bool(value))
     
     @property
     @inmain_decorator(True)
@@ -540,24 +541,28 @@ class Tab(object):
                
     @define_state(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL,True)  
     def _timeout_add(self,delay,execute_timeout):
-        QTimer.singleShot(delay,execute_timeout)
+        self.logger.debug("inside timeout_add state with the QTimer")
+        inmain(QTimer.singleShot, delay,execute_timeout)
     
     def statemachine_timeout_add(self,delay,statefunction,*args,**kwargs):
         # Add the timeout to our set of registered timeouts. Timeouts
         # can thus be removed by the user at ay time by calling
         # self.timeouts.remove(function)
         self._timeouts.add(statefunction)
+        self.logger.debug("inside statemachine_timeout_add")
         # Here's a function which executes the timeout once, then queues
         # itself up again after a delay:
         def execute_timeout():
             # queue up the state function, but only if it hasn't been
             # removed from self.timeouts:
             if statefunction in self._timeouts and self._timeout_ids[statefunction] == unique_id:
+                self.logger.debug(f"calling _timeout_add for delay {delay} and function {statefunction}")
                 # Only queue up the state if we are in an allowed mode
                 if statefunction._allowed_modes&self.mode:
                     statefunction(*args, **kwargs)
                 # queue up another call to this function (execute_timeout)
                 # after the delay time:
+
                 self._timeout_add(delay,execute_timeout)
             
         # Store a unique ID for this timeout so that we don't confuse 
@@ -566,7 +571,8 @@ class Tab(object):
         unique_id = get_unique_id()
         self._timeout_ids[statefunction] = unique_id
         # queue the first run:
-        #QTimer.singleShot(delay,execute_timeout)    
+        #QTimer.singleShot(delay,execute_timeout)   
+        self.logger.debug("calling execute_timeout function") 
         execute_timeout()
         
     # Returns True if the timeout was removed
@@ -783,13 +789,15 @@ class Tab(object):
                 # Run the task with the GUI lock, catching any exceptions:
                 #func = getattr(self,funcname)
                 # run the function in the Qt main thread
-                generator = inmain(func,self,*args,**kwargs)
+                # generator = inmain(func,self,*args,**kwargs)
+                generator = func(self, *args, **kwargs)
                 # Do any work that was queued up:(we only talk to the worker if work has been queued up through the yield command)
                 if type(generator) == GeneratorType:
                     # We need to call next recursively, queue up work and send the results back until we get a StopIteration exception
                     generator_running = True
                     # get the data from the first yield function
-                    worker_process,worker_function,worker_args,worker_kwargs = inmain(generator.__next__)
+                    # worker_process,worker_function,worker_args,worker_kwargs = inmain(generator.__next__)
+                    worker_process,worker_function,worker_args,worker_kwargs = generator.__next__()
                     # Continue until we get a StopIteration exception, or the user requests a restart
                     while generator_running:
                         try:
@@ -837,7 +845,8 @@ class Tab(object):
                             # Send the results back to the GUI function
                             logger.debug('returning worker results to function %s' % func.__name__)
                             self.state = '%s (GUI)'%func.__name__
-                            next_yield = inmain(generator.send,results) 
+                            # next_yield = inmain(generator.send,results) 
+                            next_yield = generator.send(results)
                             # If there is another yield command, put the data in the required variables for the next loop iteration
                             if next_yield:
                                 worker_process,worker_function,worker_args,worker_kwargs = next_yield
