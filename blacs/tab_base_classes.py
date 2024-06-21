@@ -75,7 +75,7 @@ class StateQueue(object):
     
     def __init__(self,device_name):
         self.logger = logging.getLogger('BLACS.%s.state_queue'%(device_name))
-        self.logging_enabled = True
+        self.logging_enabled = False
         if self.logging_enabled:
             self.logger.debug("started")
         
@@ -551,7 +551,6 @@ class Tab(object):
                
     @define_state(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL,True)  
     def _timeout_add(self,delay,execute_timeout):
-        self.logger.debug("inside timeout_add state with the QTimer")
         inmain(QTimer.singleShot, delay,execute_timeout)
     
     def statemachine_timeout_add(self,delay,statefunction,*args,**kwargs):
@@ -559,14 +558,12 @@ class Tab(object):
         # can thus be removed by the user at ay time by calling
         # self.timeouts.remove(function)
         self._timeouts.add(statefunction)
-        self.logger.debug("inside statemachine_timeout_add")
         # Here's a function which executes the timeout once, then queues
         # itself up again after a delay:
         def execute_timeout():
             # queue up the state function, but only if it hasn't been
             # removed from self.timeouts:
             if statefunction in self._timeouts and self._timeout_ids[statefunction] == unique_id:
-                self.logger.debug(f"calling _timeout_add for delay {delay} and function {statefunction}")
                 # Only queue up the state if we are in an allowed mode
                 if statefunction._allowed_modes&self.mode:
                     statefunction(*args, **kwargs)
@@ -582,7 +579,6 @@ class Tab(object):
         self._timeout_ids[statefunction] = unique_id
         # queue the first run:
         #QTimer.singleShot(delay,execute_timeout)   
-        self.logger.debug("calling execute_timeout function") 
         execute_timeout()
         
     # Returns True if the timeout was removed

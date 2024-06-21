@@ -469,13 +469,14 @@ class QueueManager(object):
         else:
             return False
 
-    @inmain_decorator(wait_for_return=True)
+    # @inmain_decorator(wait_for_return=True)
     def set_status(self, queue_status, shot_filepath=None):
-        self._ui.queue_status.setText(str(queue_status))
-        if shot_filepath is not None:
-            self._ui.running_shot_name.setText('<b>%s</b>'% str(os.path.basename(shot_filepath)))
-        else:
-            self._ui.running_shot_name.setText('')
+        pass
+        # self._ui.queue_status.setText(str(queue_status))
+        # if shot_filepath is not None:
+        #     self._ui.running_shot_name.setText('<b>%s</b>'% str(os.path.basename(shot_filepath)))
+        # else:
+        #     self._ui.running_shot_name.setText('')
         
     @inmain_decorator(wait_for_return=True)
     def get_status(self):
@@ -589,17 +590,24 @@ class QueueManager(object):
 
                 start_time = time.time()
                 
-                with h5py.File(path, 'r') as hdf5_file:
-                    devices_in_use = {}
-                    start_order = {}
-                    stop_order = {}
-                    for name in  hdf5_file['devices']:
-                        device_properties = labscript_utils.properties.get(
-                            hdf5_file, name, 'device_properties'
-                        )
-                        devices_in_use[name] = self.BLACS.tablist[name]
-                        start_order[name] = device_properties.get('start_order', None)
-                        stop_order[name] = device_properties.get('stop_order', None)
+                # TODO:OPT: opening this h5 file causes a 20ms delay
+                # with h5py.File(path, 'r') as hdf5_file:
+                #     devices_in_use = {}
+                #     start_order = {}
+                #     stop_order = {}
+                #     for name in  hdf5_file['devices']:
+                #         device_properties = labscript_utils.properties.get(
+                #             hdf5_file, name, 'device_properties'
+                #         )
+                #         devices_in_use[name] = self.BLACS.tablist[name]
+                #         start_order[name] = device_properties.get('start_order', None)
+                #         stop_order[name] = device_properties.get('stop_order', None)
+
+                names = ['ni_6363', 'pb']
+                for name in names:
+                    devices_in_use[name] = self.BLACS.tablist[name]
+                start_order = {'ni_6363': 0, 'pb': 0}
+                stop_order = {'ni_6363': -1, 'pb': 0}
 
                 # Sort the devices into groups based on their start_order and stop_order
                 start_groups = defaultdict(set)
