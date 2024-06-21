@@ -190,10 +190,6 @@ class StateQueue(object):
             raise Exception('You have multiple threads trying to get from this queue at the same time. I won\'t allow it!')
     
         self.last_requested_state = state
-        # TODO: put in a more visible spot
-        if not self.qt_mainloop_instantiated:
-            self.queue_inmain()
-            self.qt_mainloop_instantiated = True
         while True:
             if self.logging_enabled:
                 self.logger.debug('requesting next item in queue with mode %d'%state)
@@ -317,7 +313,9 @@ class Tab(object):
         self._timeout = QTimer()
         self._timeout.timeout.connect(self.check_time)
         self._timeout.start(1000)
-                
+        
+        self.qt_mainloop_instantiated = False
+
         # Launch the mainloop
         self._mainloop_thread = threading.Thread(target = self.mainloop)
         self._mainloop_thread.daemon = True
@@ -463,7 +461,7 @@ class Tab(object):
     @mode.setter
     def mode(self,mode):
         self._mode = mode
-        self._update_state_label()
+        # self._update_state_label()
         
     @property
     def state(self):
@@ -473,10 +471,13 @@ class Tab(object):
     def state(self,state):
         self._state = state        
         self._time_of_last_state_change = time.time()
-        self._update_state_label()
+        # self._update_state_label()
         self._update_error_and_tab_icon()
     
-    @inmain_decorator(True)
+    # TODO: updating state label in each of the device threads causes their execution to become serialized
+    # as the state label GUI update must happen in the MainThread  
+    # Need to make a decision to remove entirely as it doesn't give too much information
+    # @inmain_decorator(True)
     def _update_state_label(self):
         if self.mode == 1:
             mode = 'Manual'
@@ -489,7 +490,7 @@ class Tab(object):
         else:
             raise RuntimeError('self.mode for device %s is invalid. It must be one of MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL or MODE_BUFFERED'%(self.device_name))
     
-        self._ui.state_label.setText('<b>%s mode</b> - State: %s'%(mode,self.state))
+        # self._ui.state_label.setText('<b>%s mode</b> - State: %s'%(mode,self.state))
         
         # Todo: Update icon in tab
     
@@ -785,6 +786,12 @@ class Tab(object):
         
         try:
             while True:
+                # Statemachine loop (Tab.mainloop) should not get any states out of the queue until after the entire tab is initialised 
+                # and the Qt mainloop starts.
+                if not self.qt_mainloop_instantiated:
+                    logger.debug('Waiting for QT mainloop to be instantiated')
+                    event_queue.queue_inmain()
+                    self.qt_mainloop_instantiated = True
                 # Get the next task from the event queue:
                 logger.debug('Waiting for next event')
                 func, data = event_queue.get(self.mode)
