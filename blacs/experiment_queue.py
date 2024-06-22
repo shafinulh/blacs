@@ -485,8 +485,7 @@ class QueueManager(object):
     @inmain_decorator(wait_for_return=True)
     def get_next_file(self):
         return str(self._model.takeRow(0)[0].text())
-    
-    @inmain_decorator(wait_for_return=True)    
+      
     def transition_device_to_buffered(self, name, transition_list, h5file, restart_receiver):
         tab = self.BLACS.tablist[name]
         if self.get_device_error_state(name,self.BLACS.tablist):
@@ -591,23 +590,23 @@ class QueueManager(object):
                 start_time = time.time()
                 
                 # TODO:OPT: opening this h5 file causes a 20ms delay
-                # with h5py.File(path, 'r') as hdf5_file:
-                #     devices_in_use = {}
-                #     start_order = {}
-                #     stop_order = {}
-                #     for name in  hdf5_file['devices']:
-                #         device_properties = labscript_utils.properties.get(
-                #             hdf5_file, name, 'device_properties'
-                #         )
-                #         devices_in_use[name] = self.BLACS.tablist[name]
-                #         start_order[name] = device_properties.get('start_order', None)
-                #         stop_order[name] = device_properties.get('stop_order', None)
+                with h5py.File(path, 'r') as hdf5_file:
+                    devices_in_use = {}
+                    start_order = {}
+                    stop_order = {}
+                    for name in  hdf5_file['devices']:
+                        device_properties = labscript_utils.properties.get(
+                            hdf5_file, name, 'device_properties'
+                        )
+                        devices_in_use[name] = self.BLACS.tablist[name]
+                        start_order[name] = device_properties.get('start_order', None)
+                        stop_order[name] = device_properties.get('stop_order', None)
 
-                names = ['ni_6363', 'pb']
-                for name in names:
-                    devices_in_use[name] = self.BLACS.tablist[name]
-                start_order = {'ni_6363': 0, 'pb': 0}
-                stop_order = {'ni_6363': -1, 'pb': 0}
+                # names = ['ni_6363', 'pb']
+                # for name in names:
+                #     devices_in_use[name] = self.BLACS.tablist[name]
+                # start_order = {'ni_6363': 0, 'pb': 0}
+                # stop_order = {'ni_6363': 0, 'pb': 0}
 
                 # Sort the devices into groups based on their start_order and stop_order
                 start_groups = defaultdict(set)

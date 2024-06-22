@@ -866,7 +866,7 @@ class Tab(object):
 
                             # Reset the hide_not_responding_error_until, since we have now heard from the child                        
                             self.hide_not_responding_error_until = 0
-                            logger.debug('returning worker results to function %s for {}' % func.__name__)
+                            logger.debug('returning worker results to function %s' % func.__name__)
                             self.state = '%s (GUI)'%func.__name__
                             
                             generator.send(results_send_list)
