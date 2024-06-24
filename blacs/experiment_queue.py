@@ -37,7 +37,7 @@ from labscript_utils.qtwidgets.elide_label import elide_label
 from labscript_utils.connections import ConnectionTable
 import labscript_utils.properties
 
-from blacs.tab_base_classes import MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL, MODE_BUFFERED  
+from blacs.tab_base_classes import MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL, MODE_BUFFERED, MODE_POST_EXP, MODE_TRANSITION_TO_POST_EXP  
 import blacs.plugins as plugins
 
 
@@ -529,10 +529,52 @@ class QueueManager(object):
         while self.manager_running:
             # If the pause button is pushed in, sleep
             if self.manager_paused:
+                
+                # If there are experiments still in the queue, BLACs tabs will not have transition_to_manual
+                # upon toggling the pause button
+                # Transition all the devices still in MODE_POST_EXP to manual mode so the user can regain control
+                transition_list = {}
+                notify_queue = queue.Queue()
+                for devicename, tab in self.BLACS.tablist.items():
+                    if tab.mode == MODE_POST_EXP or tab.mode == MODE_TRANSITION_TO_POST_EXP:
+                        self._logger.info(f"transitioning {devicename} to manual upon pause")
+                        tab.transition_to_manual(notify_queue)
+                        transition_list[devicename] = tab
+                # Wait for their responses:
+                while transition_list:
+                    self._logger.info('Waiting for the following devices to finish transitioning to manual mode: %s'%str(transition_list))
+                    try:
+                        name, result = notify_queue.get(2)
+                        if name == 'Queue Manager' and result == 'abort':
+                            # Ignore any abort signals left in the queue, it is too
+                            # late to abort in any case:
+                            continue
+                    except queue.Empty:
+                        # 2 seconds without a device transitioning to manual mode.
+                        # Is there an error:
+                        for name in transition_list.copy():
+                            if self.get_device_error_state(name, transition_list):
+                                error_condition = True
+                                self._logger.debug('%s is in an error state' % name)
+                                del transition_list[name]
+                        continue
+                    if result == 'fail':
+                        error_condition = True
+                        self._logger.debug('%s failed to transition to manual' % name)
+                    elif result == 'restart':
+                        error_condition = True
+                        self._logger.debug('%s restarted during transition to manual' % name)
+                    elif self.get_device_error_state(name, self.BLACS.tablist):
+                        error_condition = True
+                        self._logger.debug('%s is in an error state' % name)
+                    else:
+                        self._logger.debug('%s finished transitioning to manual mode' % name)
+                    del transition_list[name]
+
                 if self.get_status() == "Idle":
                     logger.info('Paused')
                     self.set_status("Queue paused") 
-                time.sleep(1)
+                time.sleep(0.5)
                 continue
             
             # Get the top file
