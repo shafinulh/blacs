@@ -30,7 +30,7 @@ try:
 except ImportError:
     from blacs.blacs import BLACS_DIR
 from blacs.tab_base_classes import Tab, Worker, define_state
-from blacs.tab_base_classes import MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL, MODE_BUFFERED
+from blacs.tab_base_classes import MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL, MODE_BUFFERED, MODE_TRANSITION_TO_POST_EXP, MODE_POST_EXP
 from blacs.output_classes import AO, DO, DDS, Image
 from labscript_utils.qtwidgets.toolpalette import ToolPaletteGroup
 from labscript_utils.shared_drive import path_to_agnostic
@@ -590,7 +590,7 @@ class DeviceTab(Tab):
     def start_run(self,notify_queue):
         raise NotImplementedError('The device %s has not implemented a start method and so cannot be used to trigger the experiment to begin. Please implement the start method or use a different pseudoclock as the master pseudoclock'%self.device_name)
     
-    @define_state(MODE_MANUAL,True)
+    @define_state(MODE_MANUAL|MODE_POST_EXP,True)
     def transition_to_buffered(self,h5_file,notify_queue): 
         # Get rid of any "remote values changed" dialog
         # self._changed_widget.hide()
@@ -667,7 +667,7 @@ class DeviceTab(Tab):
             notify_queue.put([self.device_name,'fail'])
             raise Exception('Could not abort the buffered sequence. You must restart this device to continue')
             
-    @define_state(MODE_BUFFERED,False)
+    @define_state(MODE_BUFFERED|MODE_POST_EXP,False)
     def transition_to_manual(self,notify_queue,program=False):
         self.mode = MODE_TRANSITION_TO_MANUAL
         tasks = []
@@ -705,7 +705,7 @@ class DeviceTab(Tab):
     # Post Experiment State has no GUI updates. This is critical for the skip_manual flow
     @define_state(MODE_BUFFERED,False)
     def post_experiment(self,notify_queue,program=False,skip_manual=False):
-        self.mode = MODE_BUFFERED
+        self.mode = MODE_TRANSITION_TO_POST_EXP
         tasks = []
         tasks.append(self.queue_work(self._primary_worker,'post_experiment'))
         for worker in self._secondary_workers:
@@ -714,6 +714,8 @@ class DeviceTab(Tab):
         raw_results = yield(tasks, False)
         success = all(raw_results)
 
+        self.mode = MODE_POST_EXP
+        
         if not skip_manual:
             if success:
                 self.transition_to_manual(notify_queue,program)
@@ -725,7 +727,6 @@ class DeviceTab(Tab):
                 notify_queue.put([self.device_name,'success'])
                 # We are not actually in manual mode but it is safe to carry out
                 # any states associated with MODE_MANUAL.
-                self.mode = MODE_MANUAL
             else:
                 notify_queue.put([self.device_name,'fail'])
                 raise Exception('Could not process post experiment. You must restart this device to continue')

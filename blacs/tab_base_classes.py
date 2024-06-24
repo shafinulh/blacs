@@ -60,6 +60,8 @@ MODE_MANUAL = 1
 MODE_TRANSITION_TO_BUFFERED = 2
 MODE_TRANSITION_TO_MANUAL = 4
 MODE_BUFFERED = 8  
+MODE_TRANSITION_TO_POST_EXP = 16
+MODE_POST_EXP = 32
             
 class StateQueue(object):
     def __init__(self,device_name):
@@ -197,7 +199,7 @@ def define_state(allowed_modes,queue_state_indefinitely,delete_stale_states=Fals
     def wrap(function):
         unescaped_name = function.__name__
         escapedname = '_' + function.__name__
-        if allowed_modes < 1 or allowed_modes > 15:
+        if allowed_modes < 1 or allowed_modes > 63:
             raise RuntimeError('Function %s has been set to run in unknown states. Please make sure allowed states is one or more of MODE_MANUAL,'%unescaped_name+
             'MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL and MODE_BUFFERED (or-ed together using the | symbol, eg MODE_MANUAL|MODE_BUFFERED')
         def f(self,*args,**kwargs):
