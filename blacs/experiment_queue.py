@@ -485,6 +485,10 @@ class QueueManager(object):
     @inmain_decorator(wait_for_return=True)
     def get_next_file(self):
         return str(self._model.takeRow(0)[0].text())
+    
+    @inmain_decorator(wait_for_return=True)
+    def has_next_file(self):
+        return self._model.rowCount() > 0
       
     def transition_device_to_buffered(self, name, transition_list, h5file, restart_receiver):
         tab = self.BLACS.tablist[name]
@@ -859,7 +863,14 @@ class QueueManager(object):
                     data_group = hdf5_file['/'].create_group('data')
                     # stamp with the run time of the experiment
                     hdf5_file.attrs['run time'] = run_time.strftime('%Y%m%dT%H%M%S.%f')
-        
+                
+                # check if there is another file in the queue already
+                queued_experiments = True
+                try:
+                    queued_experiments = self.has_next_file()
+                except Exception:
+                    pass
+
                 error_condition = False
                 response_list = {}
                 # Keep executing post_experiment state of each tab and waiting on them until
@@ -873,7 +884,7 @@ class QueueManager(object):
                     for name in stop_groups.pop(min(stop_groups)):
                         tab = devices_in_use[name]
                         try:
-                            tab.post_experiment(self.current_queue)
+                            tab.post_experiment(self.current_queue, skip_manual=queued_experiments)
                             transition_list[name] = tab
                         except Exception:
                             logger.exception('Exception while transitioning %s to manual mode.'%(name))
