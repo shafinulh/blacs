@@ -45,8 +45,10 @@ from labscript_utils import dedent
 
 
 class Counter(object):
-    """A class with a single method that 
-    returns a different integer each time it's called."""
+    """
+    A class with a single method that returns 
+    a different integer each time it's called.
+    """
     def __init__(self):
         self.i = 0
     def get(self):
@@ -60,19 +62,6 @@ MODE_TRANSITION_TO_MANUAL = 4
 MODE_BUFFERED = 8  
             
 class StateQueue(object):
-    # NOTE:
-    #
-    # It is theoretically possible to remove the dependency on the Qt Mainloop (remove inmain decorators and fnuction calls)
-    # by introducing a local lock object instead. However, be aware that right now, the Qt inmain lock is preventing the 
-    # statemachine loop (Tab.mainloop) from getting any states uot of the queue until after the entire tab is initialised 
-    # and the Qt mainloop starts.
-    #
-    # This is particularly important because we exploit this behaviour to make sure that Tab._initialise_worker is placed at the
-    # start of the StateQueue, and so the Tab.mainloop method is guaranteed to get this initialisation method as the first state 
-    # regardless of whether the mainloop is started before the state is inserted (the state should always be inserted as part of  
-    # the call to Tab.create_worker, in DeviceTab.initialise_workers in DeviceTab.__init__ )
-    #
-    
     def __init__(self,device_name):
         self.logger = logging.getLogger('BLACS.%s.state_queue'%(device_name))
         self.logging_enabled = False
@@ -82,11 +71,10 @@ class StateQueue(object):
         self.list_of_states = []
         self._last_requested_state = None
 
-        self._lock = threading.Lock()
-        self._list_of_states_lock = threading.Lock()
+        self._queue_lock = threading.Lock()
+        self._state_requested = threading.Condition(self._queue_lock)
+        self._state_added = threading.Condition(self._queue_lock)
         self.qt_mainloop_instantiated = False
-        # A queue that blocks the get(requested_state) method until an entry in the queue has a state that matches the requested_state
-        self.get_blocking_queue = queue.Queue()
 
     @inmain_decorator(True)
     def queue_inmain(self):
@@ -94,113 +82,111 @@ class StateQueue(object):
 
     @property
     def last_requested_state(self):
-        with self._lock:
-            return self._last_requested_state
+        return self._last_requested_state
 
     @last_requested_state.setter
     def last_requested_state(self, value):
-        with self._lock:
-            self._last_requested_state = value
+        self._last_requested_state = value
      
     def log_current_states(self):
         if self.logging_enabled:
-            with self._list_of_states_lock:
-                self.logger.debug('Current items in the state queue: %s'%str(self.list_of_states))
-     
-    def put(self, allowed_states, queue_state_indefinitely, delete_stale_states, data, priority=0):
-        """Add a state to the queue. Lower number for priority indicates the state will
-        be executed before any states with higher numbers for their priority"""
-        # State data starts with priority, and then with a unique id that monotonically
-        # increases. This way, sorting the queue will sort first by priority and then by
-        # order added.
-        state_data = [priority, get_unique_id(), allowed_states, queue_state_indefinitely, delete_stale_states,data]
-        # Insert the task into the queue, retaining sort order first by priority and then by order added:
-        with self._list_of_states_lock:
-            insort(self.list_of_states, state_data)
-        # if this state is one the get command is waiting for, notify it!
-        if self.last_requested_state is not None and (allowed_states & self.last_requested_state):
-            self.get_blocking_queue.put('new item')
-        
-        if self.logging_enabled:
-            if not isinstance(data[0],str):
-                self.logger.debug('New state queued up. Allowed modes: %d, queue state indefinitely: %s, delete stale states: %s, function: %s'%(allowed_states,str(queue_state_indefinitely),str(delete_stale_states),data[0].__name__))
-        self.log_current_states()
+            self.logger.debug('Current items in the state queue: %s'%str(self.list_of_states))
     
-    def check_for_next_item(self,state):
-        # We reset the queue here, as we are about to traverse the tree, which contains any new items that
-        # are described in messages in this queue, so let's not keep those messages around anymore.
-        # Put another way, we want to block until a new item is added, if we don't find an item in this function
-        # So it's best if the queue is empty now!
-        if self.logging_enabled:
-            self.logger.debug('Re-initialsing self._get_blocking_queue')
-        self.get_blocking_queue = queue.Queue()
+    # We can now have multiple threads (producers) add to the StateQueue
+    # The lock that wraps the entire function ensures thread-safety - only one thread can add a state to the queue at a time.
+    # Once the requested state is added, the consumer function (get) is notified to process + execute the state function 
+    def put(self, allowed_states, queue_state_indefinitely, delete_stale_states, data, priority=0):
+        """
+        Add a state to the queue. Lower number for priority indicates the state will
+        be executed before any states with higher numbers for their priority
+        """
+        with self._state_added:
+            # State data is sorted into the queue first by priority and then by
+            # order added.
+            state_data = [priority, get_unique_id(), allowed_states, queue_state_indefinitely, delete_stale_states,data]
+            # Insert the task into the queue, retaining sort order first by priority and then by order added:
+            insort(self.list_of_states, state_data)
+            
+            # log the addition of the new state, if necessary
+            if self.logging_enabled:
+                if not isinstance(data[0],str):
+                    self.logger.debug('New state queued up. Allowed modes: %d, queue state indefinitely: %s, delete stale states: %s, function: %s'%(allowed_states,str(queue_state_indefinitely),str(delete_stale_states),data[0].__name__))
+            self.log_current_states()
 
+            # if this state is one the get command is waiting for, notify it!
+            if self.last_requested_state is not None and (allowed_states & self.last_requested_state):
+                self._state_requested.notify()
+    
+    # Thread-safety of this function is maanged by the caller function StateQueue::get()
+    # the current locking scheme also serializes the get and put methods, so shared resources such as self.list_of_states
+    # will remain synchronized
+    def check_for_next_item(self,state):
         # traverse the list
         delete_index_list = []
         success = False
-        with self._list_of_states_lock:
-            for i,item in enumerate(self.list_of_states):
-                priority, unique_id, allowed_states, queue_state_indefinitely, delete_stale_states, data = item
+
+        for i,item in enumerate(self.list_of_states):
+            priority, unique_id, allowed_states, queue_state_indefinitely, delete_stale_states, data = item
+            if self.logging_enabled:
+                self.logger.debug('iterating over states in queue')
+            if allowed_states&state:
+                # We have found one! Remove it from the list
+                delete_index_list.append(i)
+                
                 if self.logging_enabled:
-                    self.logger.debug('iterating over states in queue')
-                if allowed_states&state:
-                    # We have found one! Remove it from the list
-                    delete_index_list.append(i)
-                    
-                    if self.logging_enabled:
-                        self.logger.debug('requested state found in queue')
-                    
-                    # If we are to delete stale states, see if the next state is the same statefunction.
-                    # If it is, use that one, or whichever is the latest entry without encountering a different statefunction,
-                    # and delete the rest
-                    if delete_stale_states:
-                        state_function = data[0]
+                    self.logger.debug('requested state found in queue')
+                
+                # If we are to delete stale states, see if the next state is the same statefunction.
+                # If it is, use that one, or whichever is the latest entry without encountering a different statefunction,
+                # and delete the rest
+                if delete_stale_states:
+                    state_function = data[0]
+                    i+=1
+                    while i < len(self.list_of_states) and state_function == self.list_of_states[i][5][0]:
+                        if self.logging_enabled:
+                            self.logger.debug('requesting deletion of stale state')
+                        priority, unique_id, allowed_states, queue_state_indefinitely, delete_stale_states, data = self.list_of_states[i]
+                        delete_index_list.append(i)
                         i+=1
-                        while i < len(self.list_of_states) and state_function == self.list_of_states[i][5][0]:
-                            if self.logging_enabled:
-                                self.logger.debug('requesting deletion of stale state')
-                            priority, unique_id, allowed_states, queue_state_indefinitely, delete_stale_states, data = self.list_of_states[i]
-                            delete_index_list.append(i)
-                            i+=1
-                    
-                    success = True
-                    break
-                elif not queue_state_indefinitely:
-                    if self.logging_enabled:
-                        self.logger.debug('state should not be queued indefinitely')
-                    delete_index_list.append(i)
-            
-            # do this in reverse order so that the first delete operation doesn't mess up the indices of subsequent ones
-            for index in reversed(sorted(delete_index_list)):
+                
+                success = True
+                break
+            elif not queue_state_indefinitely:
                 if self.logging_enabled:
-                    self.logger.debug('deleting state')
-                del self.list_of_states[index]
+                    self.logger.debug('state should not be queued indefinitely')
+                delete_index_list.append(i)
+        
+        # do this in reverse order so that the first delete operation doesn't mess up the indices of subsequent ones
+        for index in reversed(sorted(delete_index_list)):
+            if self.logging_enabled:
+                self.logger.debug('deleting state')
+            del self.list_of_states[index]
             
         if not success:
             data = None
         return success,data    
         
-    # this method should not be called in the main thread, because it will block until something is found...
-    # Please, only have one thread ever accessing this...I have no idea how it will behave if multiple threads are trying to get
-    # items from the queue...
-    #
-    # This method will block until a item found in the queue is found to be allowed during the specified 'state'.
+    # Each DeviceTab StateQueue object has a single consumer, the DeviceTab.mainloop thread. Execution of this function
+    # in the mainloop is thread-safe as synchronization with the producer function is handled using the acquisition of  
+    # the self._queue_lock in each of the functions
     def get(self,state):
-        if self.last_requested_state:
-            raise Exception('You have multiple threads trying to get from this queue at the same time. I won\'t allow it!')
-    
-        self.last_requested_state = state
-        while True:
-            if self.logging_enabled:
-                self.logger.debug('requesting next item in queue with mode %d'%state)
-                self.log_current_states
-            status,data = self.check_for_next_item(state)
-            if not status:
-                # we didn't find anything useful, so we'll wait until a useful state is added!
-                self.get_blocking_queue.get()
-            else:
-                self.last_requested_state = None
-                return data
+        with self._state_requested:
+            if self.last_requested_state:
+                raise Exception('You have multiple threads trying to get from this queue at the same time. I won\'t allow it!')
+        
+            self.last_requested_state = state
+            while True:
+                if self.logging_enabled:
+                    self.logger.debug('requesting next item in queue with mode %d'%state)
+                    self.log_current_states
+                status,data = self.check_for_next_item(state)
+                if not status:
+                    # wait and release lock here if the requested state is not in the queue
+                    # as we wait for the requested state to be added
+                    self._state_requested.wait()
+                else:
+                    self.last_requested_state = None
+                    return data
 
 
 # A counter for uniqely numbering timeouts and numbering queued states monotinically,
