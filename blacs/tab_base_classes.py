@@ -803,7 +803,14 @@ class Tab(object):
                             results_list = []
                             results_send_list = []
                             worker_tasks, check_first = generator.__next__()
-                            for worker_task in worker_tasks:
+                            # Traverse the worker_tasks in reverse since the secondary workers
+                            # (specifically the acquisition worker of the NI device) takes longer than the
+                            # primary worker. Workers are currently scheduled ~10ms after each other
+                            # TODO:OPT: Devise a more appropriate way to specify the order in which worker tasks
+                            # are completed. Perhaps the state function should return a worker order based on the
+                            # device
+                            for i in range(len(worker_tasks)-1, -1, -1):
+                                worker_task = worker_tasks[i]
                                 worker_process,worker_function,worker_args,worker_kwargs = worker_task
                                 logger.debug('Instructing worker %s to do job %s'%(worker_process,worker_function) )
                                 if worker_function == 'init':

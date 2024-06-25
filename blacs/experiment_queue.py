@@ -635,24 +635,27 @@ class QueueManager(object):
 
                 start_time = time.time()
                 
-                # TODO:OPT: opening this h5 file causes a 20ms delay
-                with h5py.File(path, 'r') as hdf5_file:
-                    devices_in_use = {}
-                    start_order = {}
-                    stop_order = {}
-                    for name in  hdf5_file['devices']:
-                        device_properties = labscript_utils.properties.get(
-                            hdf5_file, name, 'device_properties'
-                        )
-                        devices_in_use[name] = self.BLACS.tablist[name]
-                        start_order[name] = device_properties.get('start_order', None)
-                        stop_order[name] = device_properties.get('stop_order', None)
+                # TODO:OPT: opening this h5 file causes a 20ms delay.
+                # with h5py.File(path, 'r') as hdf5_file:
+                #     devices_in_use = {}
+                #     start_order = {}
+                #     stop_order = {}
+                #     for name in  hdf5_file['devices']:
+                #         device_properties = labscript_utils.properties.get(
+                #             hdf5_file, name, 'device_properties'
+                #         )
+                #         devices_in_use[name] = self.BLACS.tablist[name]
+                #         start_order[name] = device_properties.get('start_order', None)
+                #         stop_order[name] = device_properties.get('stop_order', None)
 
-                # names = ['ni_6363', 'pb']
-                # for name in names:
-                #     devices_in_use[name] = self.BLACS.tablist[name]
-                # start_order = {'ni_6363': 0, 'pb': 0}
-                # stop_order = {'ni_6363': 0, 'pb': 0}
+                # TODO:OPT: need to find a way to either allow the user to insert the "devices_in_use"
+                # for a sequence of shots or recognize we received a sequence of shots and only read the
+                # device list on the first shot
+                names = ['ni_6363', 'pb']
+                for name in names:
+                    devices_in_use[name] = self.BLACS.tablist[name]
+                start_order = {'ni_6363': 0, 'pb': 0}
+                stop_order = {'ni_6363': 0, 'pb': 0}
 
                 # Sort the devices into groups based on their start_order and stop_order
                 start_groups = defaultdict(set)
@@ -770,7 +773,9 @@ class QueueManager(object):
                 ##########################################################################################################################################
             
                 # Get front panel data, but don't save it to the h5 file until the experiment ends:
-                states,tab_positions,window_data,plugin_data = self.BLACS.front_panel_settings.get_save_data()
+                # TODO:OPT: when running multiple shots in a sequence, we don't need to save front_panel data since 
+                # they will be identical between shots
+                # states,tab_positions,window_data,plugin_data = self.BLACS.front_panel_settings.get_save_data()
                 self.set_status("Running (program time: %.3fs)..."%(time.time() - start_time), path)
                     
                 # A Queue for event-based notification of when the experiment has finished.
@@ -900,7 +905,9 @@ class QueueManager(object):
             # start new try/except block here                   
             try:
                 with h5py.File(path,'r+') as hdf5_file:
-                    self.BLACS.front_panel_settings.store_front_panel_in_h5(hdf5_file,states,tab_positions,window_data,plugin_data,save_conn_table=False, save_queue_data=False)
+                    # TODO:OPT: when running multiple shots in a sequence, we don't need to save front_panel data since 
+                    # they will be identical between shots
+                    # self.BLACS.front_panel_settings.store_front_panel_in_h5(hdf5_file,states,tab_positions,window_data,plugin_data,save_conn_table=False, save_queue_data=False)
 
                     data_group = hdf5_file['/'].create_group('data')
                     # stamp with the run time of the experiment
