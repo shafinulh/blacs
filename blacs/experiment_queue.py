@@ -635,7 +635,12 @@ class QueueManager(object):
 
                 start_time = time.time()
                 
-                # TODO:OPT: opening this h5 file causes a 20ms delay.
+                # Hack: opening this h5 file causes a >20ms delay. Instead, hard code the device list and ordering
+                # so we don't need to retrieve it each time
+
+                # TODO:OPT: need to find a way to either allow the user to insert the "devices_in_use"
+                # for a sequence of shots or recognize we received a sequence of shots and only read the
+                # device list on the first shot
                 # with h5py.File(path, 'r') as hdf5_file:
                 #     devices_in_use = {}
                 #     start_order = {}
@@ -648,9 +653,9 @@ class QueueManager(object):
                 #         start_order[name] = device_properties.get('start_order', None)
                 #         stop_order[name] = device_properties.get('stop_order', None)
 
-                # TODO:OPT: need to find a way to either allow the user to insert the "devices_in_use"
-                # for a sequence of shots or recognize we received a sequence of shots and only read the
-                # device list on the first shot
+                # Note: To use this hack you will need to modify the following block to set the "devices_in_use",
+                # "start_order" and "stop_order" of the shots you are running. This information is stored in the compile h5 file.
+                # It only makes sense to use if all the shots in a queued sequence has the same devices and ordering
                 names = ['ni_6363', 'pb']
                 for name in names:
                     devices_in_use[name] = self.BLACS.tablist[name]
@@ -773,8 +778,9 @@ class QueueManager(object):
                 ##########################################################################################################################################
             
                 # Get front panel data, but don't save it to the h5 file until the experiment ends:
-                # TODO:OPT: when running multiple shots in a sequence, we don't need to save front_panel data since 
-                # they will be identical between shots
+
+                # Hack: Save time by not opening the h5 file to write front panel data. If this is important to you,
+                # uncomment this and the corresponding line that does the actual saving 
                 # states,tab_positions,window_data,plugin_data = self.BLACS.front_panel_settings.get_save_data()
                 self.set_status("Running (program time: %.3fs)..."%(time.time() - start_time), path)
                     
@@ -905,8 +911,7 @@ class QueueManager(object):
             # start new try/except block here                   
             try:
                 with h5py.File(path,'r+') as hdf5_file:
-                    # TODO:OPT: when running multiple shots in a sequence, we don't need to save front_panel data since 
-                    # they will be identical between shots
+                    # Hack: Save time by not opening h5 file to write front panel data
                     # self.BLACS.front_panel_settings.store_front_panel_in_h5(hdf5_file,states,tab_positions,window_data,plugin_data,save_conn_table=False, save_queue_data=False)
 
                     data_group = hdf5_file['/'].create_group('data')

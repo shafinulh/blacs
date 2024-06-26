@@ -803,7 +803,7 @@ class Tab(object):
                             results_list = []
                             results_send_list = []
                             worker_tasks, check_first = generator.__next__()
-                            # Traverse the worker_tasks in reverse since the secondary workers
+                            # Hack: Traverse the worker_tasks in reverse since the secondary workers
                             # (specifically the acquisition worker of the NI device) takes longer than the
                             # primary worker. Workers are currently scheduled ~10ms after each other
                             # TODO:OPT: Devise a more appropriate way to specify the order in which worker tasks
