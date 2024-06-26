@@ -262,6 +262,7 @@ class Tab(object):
         self._changed_widget = self._ui.changed_widget
         self._changed_layout = self._ui.changed_layout
         self._changed_widget.hide()        
+        self._changed_widget_set = False
         
         conn_str = self.BLACS_connection
         if self.remote_process_client is not None:

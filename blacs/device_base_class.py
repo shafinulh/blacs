@@ -402,7 +402,10 @@ class DeviceTab(Tab):
         self._last_programmed_values = self.get_front_panel_values()
         
         # get rid of any "remote values changed" dialog
-        # self._changed_widget.hide()
+        if self._changed_widget_set:
+            with qtlock:
+                self._changed_widget.hide()
+                self._changed_widget_set = False
         
         tasks = []
 
@@ -551,7 +554,9 @@ class DeviceTab(Tab):
             # Should probably set a tooltip on the widgets too explaining why they are disabled!
             # self._device_widget.setSensitive(False)
             # show the remote_values_change dialog
-            self._changed_widget.show()
+            with qtlock:
+                self._changed_widget.show()
+                self._changed_widget_set = True
         
             # Add an "apply" button and link to on_resolve_value_inconsistency
             buttonWidget = QWidget()
@@ -583,8 +588,11 @@ class DeviceTab(Tab):
             # Now that the inconsistency is resolved, Let's update the "last programmed values"
             # to match the remote values
             self._last_programmed_values = self.get_front_panel_values()
-            
-        # self._changed_widget.hide()
+
+        if self._changed_widget_set:   
+            with qtlock:
+                self._changed_widget.hide()
+                self._changed_widget_set = False
     
     @define_state(MODE_BUFFERED,True)
     def start_run(self,notify_queue):
@@ -593,7 +601,10 @@ class DeviceTab(Tab):
     @define_state(MODE_MANUAL|MODE_POST_EXP,True)
     def transition_to_buffered(self,h5_file,notify_queue): 
         # Get rid of any "remote values changed" dialog
-        # self._changed_widget.hide()
+        if self._changed_widget_set:
+            with qtlock:
+                self._changed_widget.hide()
+                self._changed_widget_set = False
     
         self.mode = MODE_TRANSITION_TO_BUFFERED
         
