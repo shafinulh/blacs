@@ -263,7 +263,7 @@ class Tab(object):
         self._changed_layout = self._ui.changed_layout
         self._changed_widget.hide()        
         self._changed_widget_set = False
-        
+
         conn_str = self.BLACS_connection
         if self.remote_process_client is not None:
             conn_str += " via %s:%d" % (self.remote_process_client.host, self.remote_process_client.port)
@@ -463,25 +463,27 @@ class Tab(object):
         # self._update_state_label()
         self._update_error_and_tab_icon()
     
-    # TODO: updating state label in each of the device threads causes their execution to become serialized
-    # as the state label GUI update must happen in the MainThread  
-    # Need to make a decision to remove entirely as it doesn't give too much information
+    # TODO: Need to make a decision to remove entirely as the GUI updates dont give much 
+    # useful information
     # @inmain_decorator(True)
     def _update_state_label(self):
-        if self.mode == 1:
-            mode = 'Manual'
-        elif self.mode == 2:
-            mode = 'Transitioning to buffered'
-        elif self.mode == 4:
-            mode = 'Transitioning to manual'
-        elif self.mode == 8:
-            mode = 'Buffered'
-        else:
-            raise RuntimeError('self.mode for device %s is invalid. It must be one of MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL or MODE_BUFFERED'%(self.device_name))
+        pass
+        # if self.mode == 1:
+        #     mode = 'Manual'
+        # elif self.mode == 2:
+        #     mode = 'Transitioning to buffered'
+        # elif self.mode == 4:
+        #     mode = 'Transitioning to manual'
+        # elif self.mode == 8:
+        #     mode = 'Buffered'
+        # elif self.mode == 16:
+        #     mode = 'Transitioning to post_experiment'
+        # elif self.mode == 32:
+        #     mode = 'Post_experiment'
+        # else:
+        #     raise RuntimeError('self.mode for device %s is invalid. It must be one of MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL or MODE_BUFFERED'%(self.device_name))
     
         # self._ui.state_label.setText('<b>%s mode</b> - State: %s'%(mode,self.state))
-        
-        # Todo: Update icon in tab
     
     def create_worker(self,name,WorkerClass,workerargs=None):
         """Set up a worker process. WorkerClass can either be a subclass of Worker, or a

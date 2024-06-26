@@ -469,6 +469,8 @@ class QueueManager(object):
         else:
             return False
 
+    # TODO: Need to make a decision to remove entirely as the GUI updates dont give much 
+    # useful information
     # @inmain_decorator(wait_for_return=True)
     def set_status(self, queue_status, shot_filepath=None):
         pass
@@ -618,7 +620,7 @@ class QueueManager(object):
                 error_condition = False
                 abort = False
                 restarted = False
-                self.set_status("Transitioning to buffered...", path)
+                # self.set_status("Transitioning to buffered...", path)
                 
                 # Enable abort button, and link in current_queue:
                 inmain(self._ui.queue_abort_button.clicked.connect,abort_function)
@@ -771,7 +773,7 @@ class QueueManager(object):
             
                 # Get front panel data, but don't save it to the h5 file until the experiment ends:
                 states,tab_positions,window_data,plugin_data = self.BLACS.front_panel_settings.get_save_data()
-                self.set_status("Running (program time: %.3fs)..."%(time.time() - start_time), path)
+                # self.set_status("Running (program time: %.3fs)..."%(time.time() - start_time), path)
                     
                 # A Queue for event-based notification of when the experiment has finished.
                 experiment_finished_queue = queue.Queue()
@@ -837,7 +839,7 @@ class QueueManager(object):
                     continue                
                 
                 logger.info('Run complete')
-                self.set_status("Saving data...", path)
+                # self.set_status("Saving data...", path)
             # End try/except block here
             except Exception:
                 logger.exception("Error in queue manager execution. Queue paused.")
@@ -1053,6 +1055,6 @@ class QueueManager(object):
                         self._logger.exception('Failed to copy h5_file (%s) for repeat run'%s)
                     logger.info(message)      
 
-            self.set_status("Idle")
+            # self.set_status("Idle")
         logger.info('Stopping')
 
