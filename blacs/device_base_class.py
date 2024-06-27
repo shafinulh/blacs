@@ -713,7 +713,6 @@ class DeviceTab(Tab):
         else:
             self._last_programmed_values = self.get_front_panel_values()
 
-    # Post Experiment State has no GUI updates. This is critical for the skip_manual flow
     @define_state(MODE_BUFFERED,False)
     def post_experiment(self,notify_queue,program=False,skip_manual=False):
         self.mode = MODE_TRANSITION_TO_POST_EXP
@@ -727,20 +726,16 @@ class DeviceTab(Tab):
 
         self.mode = MODE_POST_EXP
         
-        if not skip_manual:
-            if success:
-                self.transition_to_manual(notify_queue,program)
-            else:
-                notify_queue.put([self.device_name,'fail'])
-                raise Exception('Could not process post experiment. You must restart this device to continue')
-        else:
-            if success:
+        if success:
+            if skip_manual:
+                # Do not transition_to_manual, continue state machine flow from
+                # the MODE_POST_EXP state
                 notify_queue.put([self.device_name,'success'])
-                # We are not actually in manual mode but it is safe to carry out
-                # any states associated with MODE_MANUAL.
             else:
-                notify_queue.put([self.device_name,'fail'])
-                raise Exception('Could not process post experiment. You must restart this device to continue')
+                self.transition_to_manual(notify_queue,program)
+        else:
+            notify_queue.put([self.device_name,'fail'])
+            raise Exception('Could not process post experiment. You must restart this device to continue')
 
 class DeviceWorker(Worker):
     def init(self):

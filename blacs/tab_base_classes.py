@@ -463,7 +463,7 @@ class Tab(object):
         # self._update_state_label()
         self._update_error_and_tab_icon()
     
-    # TODO: Need to make a decision to remove entirely as the GUI updates dont give much 
+    # TODO: Make decision to remove entirely as the GUI updates dont give much 
     # useful information
     # @inmain_decorator(True)
     def _update_state_label(self):
@@ -533,7 +533,7 @@ class Tab(object):
         else:
             raise TypeError(WorkerClass)
         self.workers[name] = (worker,None,None)
-        self.event_queue.put(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL,True,False,[Tab._initialise_worker,[(name, workerargs),{}]], priority=-1)
+        self.event_queue.put(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL|MODE_POST_EXP|MODE_TRANSITION_TO_POST_EXP,True,False,[Tab._initialise_worker,[(name, workerargs),{}]], priority=-1)
        
     def _initialise_worker(self, worker_name, workerargs):
         tasks = []
@@ -542,7 +542,7 @@ class Tab(object):
         if self.error_message:
             raise Exception('Device failed to initialise')
                
-    @define_state(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL,True)  
+    @define_state(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL|MODE_POST_EXP|MODE_TRANSITION_TO_POST_EXP,True)  
     def _timeout_add(self,delay,execute_timeout):
         inmain(QTimer.singleShot, delay,execute_timeout)
     
@@ -592,7 +592,7 @@ class Tab(object):
             self._timeouts = set()
             return False        
     
-    @define_state(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL,True)
+    @define_state(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL|MODE_POST_EXP|MODE_TRANSITION_TO_POST_EXP,True)
     def shutdown_workers(self):
         """Ask all workers to shutdown"""
         tasks = []
@@ -619,7 +619,7 @@ class Tab(object):
         # In case the mainloop is blocking on the event queue, post a message to that
         # queue telling it to quit:
         if self._mainloop_thread.is_alive():
-            self.event_queue.put(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL,True,False,['_quit',None],priority=-1)
+            self.event_queue.put(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL|MODE_POST_EXP|MODE_TRANSITION_TO_POST_EXP,True,False,['_quit',None],priority=-1)
         self.notebook = self._ui.parentWidget().parentWidget()
         currentpage = None
         if self.notebook:

@@ -531,7 +531,6 @@ class QueueManager(object):
         while self.manager_running:
             # If the pause button is pushed in, sleep
             if self.manager_paused:
-                
                 # If there are experiments still in the queue, BLACs tabs will not have transition_to_manual
                 # upon toggling the pause button
                 # Transition all the devices still in MODE_POST_EXP to manual mode so the user can regain control
@@ -637,7 +636,8 @@ class QueueManager(object):
 
                 start_time = time.time()
                 
-                # TODO:OPT: opening this h5 file causes a 20ms delay
+                # TODO:OPT: opening this h5 file causes a 20ms delay. See blacs/performance_hacks
+                # for how to get around this.
                 with h5py.File(path, 'r') as hdf5_file:
                     devices_in_use = {}
                     start_order = {}
@@ -649,12 +649,6 @@ class QueueManager(object):
                         devices_in_use[name] = self.BLACS.tablist[name]
                         start_order[name] = device_properties.get('start_order', None)
                         stop_order[name] = device_properties.get('stop_order', None)
-
-                # names = ['ni_6363', 'pb']
-                # for name in names:
-                #     devices_in_use[name] = self.BLACS.tablist[name]
-                # start_order = {'ni_6363': 0, 'pb': 0}
-                # stop_order = {'ni_6363': 0, 'pb': 0}
 
                 # Sort the devices into groups based on their start_order and stop_order
                 start_groups = defaultdict(set)
@@ -921,7 +915,7 @@ class QueueManager(object):
                 # they are all done or have all errored/restarted/failed. If one fails, we
                 # still have to transition the rest to manual mode:
                 # After the post_experiment state has been executed, implicitly transition to 
-                # manual if necessary 
+                # manual below if necessary 
                 while stop_groups:
                     transition_list = {}
                     # Transition the next group to manual mode:
