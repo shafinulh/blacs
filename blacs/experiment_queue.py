@@ -37,7 +37,7 @@ from labscript_utils.qtwidgets.elide_label import elide_label
 from labscript_utils.connections import ConnectionTable
 import labscript_utils.properties
 
-from blacs.tab_base_classes import MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL, MODE_BUFFERED  
+from blacs.tab_base_classes import MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL, MODE_BUFFERED, MODE_POST_EXP, MODE_TRANSITION_TO_POST_EXP  
 import blacs.plugins as plugins
 
 
@@ -469,13 +469,16 @@ class QueueManager(object):
         else:
             return False
 
-    @inmain_decorator(wait_for_return=True)
+    # TODO: Need to make a decision to remove entirely as the GUI updates dont give much 
+    # useful information
+    # @inmain_decorator(wait_for_return=True)
     def set_status(self, queue_status, shot_filepath=None):
-        self._ui.queue_status.setText(str(queue_status))
-        if shot_filepath is not None:
-            self._ui.running_shot_name.setText('<b>%s</b>'% str(os.path.basename(shot_filepath)))
-        else:
-            self._ui.running_shot_name.setText('')
+        pass
+        # self._ui.queue_status.setText(str(queue_status))
+        # if shot_filepath is not None:
+        #     self._ui.running_shot_name.setText('<b>%s</b>'% str(os.path.basename(shot_filepath)))
+        # else:
+        #     self._ui.running_shot_name.setText('')
         
     @inmain_decorator(wait_for_return=True)
     def get_status(self):
@@ -485,7 +488,10 @@ class QueueManager(object):
     def get_next_file(self):
         return str(self._model.takeRow(0)[0].text())
     
-    @inmain_decorator(wait_for_return=True)    
+    @inmain_decorator(wait_for_return=True)
+    def has_next_file(self):
+        return self._model.rowCount() > 0
+      
     def transition_device_to_buffered(self, name, transition_list, h5file, restart_receiver):
         tab = self.BLACS.tablist[name]
         if self.get_device_error_state(name,self.BLACS.tablist):
@@ -525,10 +531,51 @@ class QueueManager(object):
         while self.manager_running:
             # If the pause button is pushed in, sleep
             if self.manager_paused:
+                # If there are experiments still in the queue, BLACs tabs will not have transition_to_manual
+                # upon toggling the pause button
+                # Transition all the devices still in MODE_POST_EXP to manual mode so the user can regain control
+                transition_list = {}
+                notify_queue = queue.Queue()
+                for devicename, tab in self.BLACS.tablist.items():
+                    if tab.mode == MODE_POST_EXP or tab.mode == MODE_TRANSITION_TO_POST_EXP:
+                        self._logger.info(f"transitioning {devicename} to manual upon pause")
+                        tab.transition_to_manual(notify_queue)
+                        transition_list[devicename] = tab
+                # Wait for their responses:
+                while transition_list:
+                    self._logger.info('Waiting for the following devices to finish transitioning to manual mode: %s'%str(transition_list))
+                    try:
+                        name, result = notify_queue.get(2)
+                        if name == 'Queue Manager' and result == 'abort':
+                            # Ignore any abort signals left in the queue, it is too
+                            # late to abort in any case:
+                            continue
+                    except queue.Empty:
+                        # 2 seconds without a device transitioning to manual mode.
+                        # Is there an error:
+                        for name in transition_list.copy():
+                            if self.get_device_error_state(name, transition_list):
+                                error_condition = True
+                                self._logger.debug('%s is in an error state' % name)
+                                del transition_list[name]
+                        continue
+                    if result == 'fail':
+                        error_condition = True
+                        self._logger.debug('%s failed to transition to manual' % name)
+                    elif result == 'restart':
+                        error_condition = True
+                        self._logger.debug('%s restarted during transition to manual' % name)
+                    elif self.get_device_error_state(name, self.BLACS.tablist):
+                        error_condition = True
+                        self._logger.debug('%s is in an error state' % name)
+                    else:
+                        self._logger.debug('%s finished transitioning to manual mode' % name)
+                    del transition_list[name]
+
                 if self.get_status() == "Idle":
                     logger.info('Paused')
                     self.set_status("Queue paused") 
-                time.sleep(1)
+                time.sleep(0.5)
                 continue
             
             # Get the top file
@@ -572,7 +619,7 @@ class QueueManager(object):
                 error_condition = False
                 abort = False
                 restarted = False
-                self.set_status("Transitioning to buffered...", path)
+                # self.set_status("Transitioning to buffered...", path)
                 
                 # Enable abort button, and link in current_queue:
                 inmain(self._ui.queue_abort_button.clicked.connect,abort_function)
@@ -589,6 +636,8 @@ class QueueManager(object):
 
                 start_time = time.time()
                 
+                # TODO:OPT: opening this h5 file causes a 40-60ms delay depending on your shot length. 
+                # See blacs/performance_hacks for how to get around this.
                 with h5py.File(path, 'r') as hdf5_file:
                     devices_in_use = {}
                     start_order = {}
@@ -718,7 +767,7 @@ class QueueManager(object):
             
                 # Get front panel data, but don't save it to the h5 file until the experiment ends:
                 states,tab_positions,window_data,plugin_data = self.BLACS.front_panel_settings.get_save_data()
-                self.set_status("Running (program time: %.3fs)..."%(time.time() - start_time), path)
+                # self.set_status("Running (program time: %.3fs)..."%(time.time() - start_time), path)
                     
                 # A Queue for event-based notification of when the experiment has finished.
                 experiment_finished_queue = queue.Queue()
@@ -784,7 +833,7 @@ class QueueManager(object):
                     continue                
                 
                 logger.info('Run complete')
-                self.set_status("Saving data...", path)
+                # self.set_status("Saving data...", path)
             # End try/except block here
             except Exception:
                 logger.exception("Error in queue manager execution. Queue paused.")
@@ -852,19 +901,28 @@ class QueueManager(object):
                     data_group = hdf5_file['/'].create_group('data')
                     # stamp with the run time of the experiment
                     hdf5_file.attrs['run time'] = run_time.strftime('%Y%m%dT%H%M%S.%f')
-        
+                
+                # check if there is another file in the queue already
+                queued_experiments = True
+                try:
+                    queued_experiments = self.has_next_file()
+                except Exception:
+                    pass
+
                 error_condition = False
                 response_list = {}
-                # Keep transitioning tabs to manual mode and waiting on them until they
-                # are all done or have all errored/restarted/failed. If one fails, we
+                # Keep executing post_experiment state of each tab and waiting on them until
+                # they are all done or have all errored/restarted/failed. If one fails, we
                 # still have to transition the rest to manual mode:
+                # After the post_experiment state has been executed, implicitly transition to 
+                # manual below if necessary 
                 while stop_groups:
                     transition_list = {}
                     # Transition the next group to manual mode:
                     for name in stop_groups.pop(min(stop_groups)):
                         tab = devices_in_use[name]
                         try:
-                            tab.transition_to_manual(self.current_queue)
+                            tab.post_experiment(self.current_queue, skip_manual=queued_experiments)
                             transition_list[name] = tab
                         except Exception:
                             logger.exception('Exception while transitioning %s to manual mode.'%(name))
@@ -991,6 +1049,6 @@ class QueueManager(object):
                         self._logger.exception('Failed to copy h5_file (%s) for repeat run'%s)
                     logger.info(message)      
 
-            self.set_status("Idle")
+            # self.set_status("Idle")
         logger.info('Stopping')
 

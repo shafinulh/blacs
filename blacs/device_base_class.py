@@ -11,9 +11,11 @@
 #                                                                   #
 #####################################################################
 import logging
+import importlib
 import sys
 import os
 import time
+import warnings
 from queue import Queue
 
 from qtutils.qt.QtCore import *
@@ -23,16 +25,19 @@ from qtutils.qt.QtWidgets import *
 import labscript_utils.excepthook
 from qtutils import UiLoader
 
+from qtutils import qtlock
+
 try:
     from blacs import BLACS_DIR
 except ImportError:
     from blacs.blacs import BLACS_DIR
 from blacs.tab_base_classes import Tab, Worker, define_state
-from blacs.tab_base_classes import MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL, MODE_BUFFERED
+from blacs.tab_base_classes import MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL, MODE_BUFFERED, MODE_TRANSITION_TO_POST_EXP, MODE_POST_EXP
 from blacs.output_classes import AO, DO, DDS, Image
 from labscript_utils.qtwidgets.toolpalette import ToolPaletteGroup
 from labscript_utils.shared_drive import path_to_agnostic
 
+from labscript_utils import dedent
 
 class DeviceTab(Tab):
     def __init__(self,notebook,settings,restart=False):
@@ -400,14 +405,21 @@ class DeviceTab(Tab):
         self._last_programmed_values = self.get_front_panel_values()
         
         # get rid of any "remote values changed" dialog
-        self._changed_widget.hide()
+        if self._changed_widget_set:
+            with qtlock:
+                self._changed_widget.hide()
+                self._changed_widget_set = False
         
-        results = yield(self.queue_work(self._primary_worker,'program_manual',self._last_programmed_values))
+        tasks = []
+
+        tasks.append(self.queue_work(self._primary_worker,'program_manual',self._last_programmed_values))
         for worker in self._secondary_workers:
-            if results:
-                returned_results = yield(self.queue_work(worker,'program_manual',self._last_programmed_values))
-                results.update(returned_results)
-        
+            tasks.append(self.queue_work(worker,'program_manual',self._last_programmed_values))
+        raw_results = yield(tasks, True)
+        results = raw_results[0]
+        if results and len(raw_results) > 1:
+            for res in raw_results[1:]:
+                results.update(res)
         # If the worker process returns something, we assume it wants us to coerce the front panel values
         if results:
             for channel,remote_value in results.items():
@@ -427,12 +439,17 @@ class DeviceTab(Tab):
     
     @define_state(MODE_MANUAL,True)
     def check_remote_values(self):
-        self._last_remote_values = yield(self.queue_work(self._primary_worker,'check_remote_values'))
+        tasks = []
+
+        tasks.append(self.queue_work(self._primary_worker,'check_remote_values'))
         for worker in self._secondary_workers:
-            if self._last_remote_values:
-                returned_results = yield(self.queue_work(worker,'check_remote_values'))
-                self._last_remote_values.update(returned_results)
+            tasks.append(self.queue_work(worker,'check_remote_values'))
         
+        raw_results = yield(tasks, True)
+        self._last_remote_values = raw_results[0]
+        if self._last_remote_values and len(raw_results) > 1:
+            for res in raw_results[1:]:
+                self._last_remote_values.update(res)
         # compare to current front panel values and prompt the user if they don't match
         # We compare to the last_programmed values so that it doesn't get confused if the user has changed the value on the front panel
         # and the program_manual command is still queued up
@@ -540,7 +557,9 @@ class DeviceTab(Tab):
             # Should probably set a tooltip on the widgets too explaining why they are disabled!
             # self._device_widget.setSensitive(False)
             # show the remote_values_change dialog
-            self._changed_widget.show()
+            with qtlock:
+                self._changed_widget.show()
+                self._changed_widget_set = True
         
             # Add an "apply" button and link to on_resolve_value_inconsistency
             buttonWidget = QWidget()
@@ -572,17 +591,23 @@ class DeviceTab(Tab):
             # Now that the inconsistency is resolved, Let's update the "last programmed values"
             # to match the remote values
             self._last_programmed_values = self.get_front_panel_values()
-            
-        self._changed_widget.hide()
+
+        if self._changed_widget_set:   
+            with qtlock:
+                self._changed_widget.hide()
+                self._changed_widget_set = False
     
     @define_state(MODE_BUFFERED,True)
     def start_run(self,notify_queue):
         raise NotImplementedError('The device %s has not implemented a start method and so cannot be used to trigger the experiment to begin. Please implement the start method or use a different pseudoclock as the master pseudoclock'%self.device_name)
     
-    @define_state(MODE_MANUAL,True)
+    @define_state(MODE_MANUAL|MODE_POST_EXP,True)
     def transition_to_buffered(self,h5_file,notify_queue): 
         # Get rid of any "remote values changed" dialog
-        self._changed_widget.hide()
+        if self._changed_widget_set:
+            with qtlock:
+                self._changed_widget.hide()
+                self._changed_widget_set = False
     
         self.mode = MODE_TRANSITION_TO_BUFFERED
         
@@ -590,17 +615,20 @@ class DeviceTab(Tab):
         # transition_to_buffered returns the final values of the run, to update the GUI with at the end of the run:
         transitioned_called = [self._primary_worker]
         front_panel_values = self.get_front_panel_values()
-        self._final_values = yield(self.queue_work(self._primary_worker,'_transition_to_buffered',self.device_name,h5_file,front_panel_values,self._force_full_buffered_reprogram))
-        if self._final_values is not None:
-            for worker in self._secondary_workers:
-                transitioned_called.append(worker)
-                extra_final_values = yield(self.queue_work(worker,'_transition_to_buffered',self.device_name,h5_file,front_panel_values,self.force_full_buffered_reprogram))
-                if extra_final_values is not None:
-                    self._final_values.update(extra_final_values)
-                else:
-                    self._final_values = None
-                    break
         
+        tasks = []
+        
+        tasks.append(self.queue_work(self._primary_worker,'_transition_to_buffered',self.device_name,h5_file,front_panel_values,self._force_full_buffered_reprogram))
+        for worker in self._secondary_workers:
+            transitioned_called.append(worker)
+            tasks.append(self.queue_work(worker,'_transition_to_buffered',self.device_name,h5_file,front_panel_values,self.force_full_buffered_reprogram))
+        raw_results = yield(tasks, True)
+        res = {}
+        for res in raw_results:
+            if res == None:
+                self._final_values = None
+                break
+            self._final_values.update(res)
         # If we get None back, then the worker process did not finish properly
         if self._final_values is None:
             notify_queue.put([self.device_name,'fail'])
@@ -608,7 +636,8 @@ class DeviceTab(Tab):
         else:
             if self._supports_smart_programming:
                 self.force_full_buffered_reprogram = False
-                self._ui.button_clear_smart_programming.setEnabled(True)
+                with qtlock:
+                    self._ui.button_clear_smart_programming.setEnabled(True)
             # Tell the queue manager that we're done:
             self.mode = MODE_BUFFERED
             notify_queue.put([self.device_name,'success'])
@@ -619,12 +648,15 @@ class DeviceTab(Tab):
             workers = [self._primary_worker]
             workers.extend(self._secondary_workers)
         success = True
+        
+        tasks = []
+        
         for worker in workers:
-            abort_success = yield(self.queue_work(worker,'abort_transition_to_buffered'))
-            if not abort_success:
-                success = False
-                # don't break here, so that as much of the device is returned to normal
-                
+            tasks.append(self.queue_work(worker,'abort_transition_to_buffered'))
+        
+        raw_results = yield(tasks, False)
+        success = all(raw_results)
+
         if success:
             self.mode = MODE_MANUAL
             self.program_device()
@@ -633,13 +665,14 @@ class DeviceTab(Tab):
         
     @define_state(MODE_BUFFERED,False)
     def abort_buffered(self,notify_queue):
-        success = yield(self.queue_work(self._primary_worker,'abort_buffered'))
+        tasks = []
+        tasks.append(self.queue_work(self._primary_worker,'abort_buffered'))
         for worker in self._secondary_workers:
-            abort_success = yield(self.queue_work(worker,'abort_buffered'))
-            if not abort_success:
-                success = False
-                # don't break here, so that as much of the device is returned to normal
+            tasks.append(self.queue_work(worker,'abort_buffered'))
         
+        raw_results = yield(tasks, False)
+        success = all(raw_results)
+
         if success:
             notify_queue.put([self.device_name,'success'])
             self.mode = MODE_MANUAL
@@ -648,30 +681,29 @@ class DeviceTab(Tab):
             notify_queue.put([self.device_name,'fail'])
             raise Exception('Could not abort the buffered sequence. You must restart this device to continue')
             
-    @define_state(MODE_BUFFERED,False)
+    @define_state(MODE_BUFFERED|MODE_POST_EXP,False)
     def transition_to_manual(self,notify_queue,program=False):
         self.mode = MODE_TRANSITION_TO_MANUAL
-        
-        success = yield(self.queue_work(self._primary_worker,'transition_to_manual'))
+        tasks = []
+        tasks.append(self.queue_work(self._primary_worker,'transition_to_manual'))
         for worker in self._secondary_workers:
-            transition_success = yield(self.queue_work(worker,'transition_to_manual'))
-            if not transition_success:
-                success = False
-                # don't break here, so that as much of the device is returned to normal
-        
+            tasks.append(self.queue_work(worker,'transition_to_manual'))
+
+        raw_results = yield(tasks, False)
+        success = all(raw_results)
+
         # Update the GUI with the final values of the run:
-        for channel, value in self._final_values.items():
-            if channel in self._AO:
-                self._AO[channel].set_value(value,program=False)
-            elif channel in self._DO:
-                self._DO[channel].set_value(value,program=False)
-            elif channel in self._image:
-                self._image[channel].set_value(value,program=False)
-            elif channel in self._DDS:
-                self._DDS[channel].set_value(value,program=False)
-        
-        
-            
+        with qtlock:
+            for channel, value in self._final_values.items():
+                if channel in self._AO:
+                    self._AO[channel].set_value(value,program=False)
+                elif channel in self._DO:
+                    self._DO[channel].set_value(value,program=False)
+                elif channel in self._image:
+                    self._image[channel].set_value(value,program=False)
+                elif channel in self._DDS:
+                    self._DDS[channel].set_value(value,program=False)
+
         if success:
             notify_queue.put([self.device_name,'success'])
             self.mode = MODE_MANUAL
@@ -683,7 +715,64 @@ class DeviceTab(Tab):
             self.program_device()
         else:
             self._last_programmed_values = self.get_front_panel_values()
-            
+
+    @define_state(MODE_BUFFERED,False)
+    def post_experiment(self,notify_queue,program=False,skip_manual=False):
+        # Ensure backwards compatibility: fallback to 'transition_to_manual' state 
+        # function if 'post_experiment' is not implemented in device workers.
+        # 
+        # Note: This check adds ~80ms overhead in the processing of the first shot of a
+        # sequence. If you choose to continue using this optimized BLACS flow, it is 
+        # recommended that you implement the post_experiment worker task for all your 
+        # devices and remove the need for this backwards compatibility check
+        old_state_flow = False
+        for worker_class in self.worker_classes:
+            exists = True
+            # If the worker_class is a string, it is an import path
+            if isinstance(worker_class, str):
+                res = worker_class.rsplit('.', 1)
+                module = importlib.import_module(res[0])
+                worker_class_import = getattr(module, res[1])
+                exists = hasattr(worker_class_import, 'post_experiment')
+            else:
+                exists = hasattr(worker_class, 'post_experiment')
+
+            if not exists:
+                self.logger.debug(f"all workers: {self.worker_classes}")
+                msg = (
+                    f"Workers for device '{self.device_name}' do not have an implementation for the newly added "
+                    "`post_experiment` state. Reverting to `transition_to_manual` as per the original labscript state "
+                    "machine flow. Consider adding an implementation for `post_experiment` for improved performance."
+                )
+                warnings.warn(dedent(msg), RuntimeWarning)
+                old_state_flow = True
+                break
+        if old_state_flow:
+            self.transition_to_manual(notify_queue, program)
+            return
+
+        self.mode = MODE_TRANSITION_TO_POST_EXP
+        tasks = []
+        tasks.append(self.queue_work(self._primary_worker,'post_experiment'))
+        for worker in self._secondary_workers:
+            tasks.append(self.queue_work(worker,'post_experiment'))
+        
+        raw_results = yield(tasks, False)
+        success = all(raw_results)
+
+        self.mode = MODE_POST_EXP
+        
+        if success:
+            if skip_manual:
+                # Do not transition_to_manual, continue state machine flow from
+                # the MODE_POST_EXP state
+                notify_queue.put([self.device_name,'success'])
+            else:
+                self.transition_to_manual(notify_queue,program)
+        else:
+            notify_queue.put([self.device_name,'fail'])
+            raise Exception('Could not process post experiment. You must restart this device to continue')
+
 class DeviceWorker(Worker):
     def init(self):
         # You read correctly, this isn't __init__, it's init. It's the
