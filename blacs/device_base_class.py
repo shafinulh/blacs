@@ -728,6 +728,7 @@ class DeviceTab(Tab):
         old_state_flow = False
         for worker_class in self.worker_classes:
             exists = True
+            # If the worker_class is a string, it is an import path
             if isinstance(worker_class, str):
                 res = worker_class.rsplit('.', 1)
                 module = importlib.import_module(res[0])

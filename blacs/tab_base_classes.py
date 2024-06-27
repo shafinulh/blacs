@@ -73,11 +73,14 @@ class StateQueue(object):
         self.list_of_states = []
         self._last_requested_state = None
 
+        # locks and condition variables to implement thread-safe Single-Consumer Multi-Producer StateQueue operations
         self._queue_lock = threading.Lock()
         self._state_requested = threading.Condition(self._queue_lock)
         self._state_added = threading.Condition(self._queue_lock)
         self.qt_mainloop_instantiated = False
 
+    # A function that must run on the QT MainThread. This function is called in the DeviceTab.mainloop to 
+    # suspends any operations until the MainThread has been instantiated
     @inmain_decorator(True)
     def queue_inmain(self):
         self.qt_mainloop_instantiated = True
@@ -94,9 +97,9 @@ class StateQueue(object):
         if self.logging_enabled:
             self.logger.debug('Current items in the state queue: %s'%str(self.list_of_states))
     
-    # We can now have multiple threads (producers) add to the StateQueue
-    # The lock that wraps the entire function ensures thread-safety - only one thread can add a state to the queue at a time.
-    # Once the requested state is added, the consumer function (get) is notified to process + execute the state function 
+    # Multiple threads (producers) can now add to the StateQueue.
+    # To ensure thread-safety, the lock wraps the entire function, allowing only one thread to add a state to the queue at a time.
+    # Once the requested state is added, the consumer function (get) is notified to process and execute the state function.
     def put(self, allowed_states, queue_state_indefinitely, delete_stale_states, data, priority=0):
         """
         Add a state to the queue. Lower number for priority indicates the state will
@@ -115,13 +118,12 @@ class StateQueue(object):
                     self.logger.debug('New state queued up. Allowed modes: %d, queue state indefinitely: %s, delete stale states: %s, function: %s'%(allowed_states,str(queue_state_indefinitely),str(delete_stale_states),data[0].__name__))
             self.log_current_states()
 
-            # if this state is one the get command is waiting for, notify it!
+            # if this state is one the consumer (get) is waiting for, notify it!
             if self.last_requested_state is not None and (allowed_states & self.last_requested_state):
                 self._state_requested.notify()
     
-    # Thread-safety of this function is maanged by the caller function StateQueue::get()
-    # the current locking scheme also serializes the get and put methods, so shared resources such as self.list_of_states
-    # will remain synchronized
+    # The caller function StateQueue::get() manages the thread-safety of this function.
+    # The locking scheme also serializes the get and put methods, ensuring that shared resources like self.list_of_states remain synchronized.
     def check_for_next_item(self,state):
         # traverse the list
         delete_index_list = []
@@ -168,9 +170,9 @@ class StateQueue(object):
             data = None
         return success,data    
         
-    # Each DeviceTab StateQueue object has a single consumer, the DeviceTab.mainloop thread. Execution of this function
-    # in the mainloop is thread-safe as synchronization with the producer function is handled using the acquisition of  
-    # the self._queue_lock in each of the functions
+    # Each DeviceTab StateQueue object has a single consumer, the DeviceTab.mainloop thread.
+    # Execution of this function in the mainloop is thread-safe, as synchronization with the producer function is managed
+    # through the acquisition of self._queue_lock.
     def get(self,state):
         with self._state_requested:
             if self.last_requested_state:
@@ -184,7 +186,7 @@ class StateQueue(object):
                 status,data = self.check_for_next_item(state)
                 if not status:
                     # wait and release lock here if the requested state is not in the queue
-                    # as we wait for the requested state to be added
+                    # while we wait for the requested state to be added
                     self._state_requested.wait()
                 else:
                     self.last_requested_state = None
@@ -832,6 +834,9 @@ class Tab(object):
                                 from_worker = workers[worker_process][2]
                                 to_worker.put(worker_arg_list)
                                 self.state = '%s (%s)'%(worker_function,worker_process)
+                                
+                                # TODO:OPT: Can speed things up further by queueing up all workers before waiting on 
+                                # each one to acknowledge the job request. However, this only saves <10ms. 
                                 # Confirm that the worker got the message:
                                 logger.debug('Waiting for worker to acknowledge job request')
                                 success, message, results = from_worker.get()
@@ -865,7 +870,7 @@ class Tab(object):
                             
                             generator.send(results_send_list)
                         except StopIteration:
-                            # The generator has finished.
+                            # The generator has finished. Stop the loop
                             logger.debug('Finalising function')
                             generator_running = False
                 self.state = 'idle'
