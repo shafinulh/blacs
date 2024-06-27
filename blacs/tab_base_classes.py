@@ -73,11 +73,14 @@ class StateQueue(object):
         self.list_of_states = []
         self._last_requested_state = None
 
+        # locks and condition variables to implement thread-safe Single-Consumer Multi-Producer StateQueue operations
         self._queue_lock = threading.Lock()
         self._state_requested = threading.Condition(self._queue_lock)
         self._state_added = threading.Condition(self._queue_lock)
         self.qt_mainloop_instantiated = False
 
+    # A function that must run on the QT MainThread. This function is called in the DeviceTab.mainloop to 
+    # suspends any operations until the MainThread has been instantiated
     @inmain_decorator(True)
     def queue_inmain(self):
         self.qt_mainloop_instantiated = True
@@ -94,9 +97,9 @@ class StateQueue(object):
         if self.logging_enabled:
             self.logger.debug('Current items in the state queue: %s'%str(self.list_of_states))
     
-    # We can now have multiple threads (producers) add to the StateQueue
-    # The lock that wraps the entire function ensures thread-safety - only one thread can add a state to the queue at a time.
-    # Once the requested state is added, the consumer function (get) is notified to process + execute the state function 
+    # Multiple threads (producers) can now add to the StateQueue.
+    # To ensure thread-safety, the lock wraps the entire function, allowing only one thread to add a state to the queue at a time.
+    # Once the requested state is added, the consumer function (get) is notified to process and execute the state function.
     def put(self, allowed_states, queue_state_indefinitely, delete_stale_states, data, priority=0):
         """
         Add a state to the queue. Lower number for priority indicates the state will
@@ -115,13 +118,12 @@ class StateQueue(object):
                     self.logger.debug('New state queued up. Allowed modes: %d, queue state indefinitely: %s, delete stale states: %s, function: %s'%(allowed_states,str(queue_state_indefinitely),str(delete_stale_states),data[0].__name__))
             self.log_current_states()
 
-            # if this state is one the get command is waiting for, notify it!
+            # if this state is one the consumer (get) is waiting for, notify it!
             if self.last_requested_state is not None and (allowed_states & self.last_requested_state):
                 self._state_requested.notify()
     
-    # Thread-safety of this function is maanged by the caller function StateQueue::get()
-    # the current locking scheme also serializes the get and put methods, so shared resources such as self.list_of_states
-    # will remain synchronized
+    # The caller function StateQueue::get() manages the thread-safety of this function.
+    # The locking scheme also serializes the get and put methods, ensuring that shared resources like self.list_of_states remain synchronized.
     def check_for_next_item(self,state):
         # traverse the list
         delete_index_list = []
@@ -168,9 +170,9 @@ class StateQueue(object):
             data = None
         return success,data    
         
-    # Each DeviceTab StateQueue object has a single consumer, the DeviceTab.mainloop thread. Execution of this function
-    # in the mainloop is thread-safe as synchronization with the producer function is handled using the acquisition of  
-    # the self._queue_lock in each of the functions
+    # Each DeviceTab StateQueue object has a single consumer, the DeviceTab.mainloop thread.
+    # Execution of this function in the mainloop is thread-safe, as synchronization with the producer function is managed
+    # through the acquisition of self._queue_lock.
     def get(self,state):
         with self._state_requested:
             if self.last_requested_state:
@@ -184,7 +186,7 @@ class StateQueue(object):
                 status,data = self.check_for_next_item(state)
                 if not status:
                     # wait and release lock here if the requested state is not in the queue
-                    # as we wait for the requested state to be added
+                    # while we wait for the requested state to be added
                     self._state_requested.wait()
                 else:
                     self.last_requested_state = None
@@ -248,6 +250,7 @@ class Tab(object):
         self._force_full_buffered_reprogram = True
         self.event_queue = StateQueue(self.device_name)
         self.workers = {}
+        self.worker_classes = [] # used to check existence of 'post_experiment' method in device worers
         self._supports_smart_programming = False
         self._restart_receiver = []
         self.shutdown_workers_complete = False
@@ -262,7 +265,8 @@ class Tab(object):
         self._changed_widget = self._ui.changed_widget
         self._changed_layout = self._ui.changed_layout
         self._changed_widget.hide()        
-        
+        self._changed_widget_set = False
+
         conn_str = self.BLACS_connection
         if self.remote_process_client is not None:
             conn_str += " via %s:%d" % (self.remote_process_client.host, self.remote_process_client.port)
@@ -462,25 +466,27 @@ class Tab(object):
         # self._update_state_label()
         self._update_error_and_tab_icon()
     
-    # TODO: updating state label in each of the device threads causes their execution to become serialized
-    # as the state label GUI update must happen in the MainThread  
-    # Need to make a decision to remove entirely as it doesn't give too much information
+    # TODO: Make decision to remove entirely as the GUI updates dont give much 
+    # useful information
     # @inmain_decorator(True)
     def _update_state_label(self):
-        if self.mode == 1:
-            mode = 'Manual'
-        elif self.mode == 2:
-            mode = 'Transitioning to buffered'
-        elif self.mode == 4:
-            mode = 'Transitioning to manual'
-        elif self.mode == 8:
-            mode = 'Buffered'
-        else:
-            raise RuntimeError('self.mode for device %s is invalid. It must be one of MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL or MODE_BUFFERED'%(self.device_name))
+        pass
+        # if self.mode == 1:
+        #     mode = 'Manual'
+        # elif self.mode == 2:
+        #     mode = 'Transitioning to buffered'
+        # elif self.mode == 4:
+        #     mode = 'Transitioning to manual'
+        # elif self.mode == 8:
+        #     mode = 'Buffered'
+        # elif self.mode == 16:
+        #     mode = 'Transitioning to post_experiment'
+        # elif self.mode == 32:
+        #     mode = 'Post_experiment'
+        # else:
+        #     raise RuntimeError('self.mode for device %s is invalid. It must be one of MODE_MANUAL, MODE_TRANSITION_TO_BUFFERED, MODE_TRANSITION_TO_MANUAL or MODE_BUFFERED'%(self.device_name))
     
         # self._ui.state_label.setText('<b>%s mode</b> - State: %s'%(mode,self.state))
-        
-        # Todo: Update icon in tab
     
     def create_worker(self,name,WorkerClass,workerargs=None):
         """Set up a worker process. WorkerClass can either be a subclass of Worker, or a
@@ -516,6 +522,7 @@ class Tab(object):
                 remote_process_client=self.remote_process_client,
                 startup_timeout=30
                 )
+            self.worker_classes.append(WorkerClass)
         elif isinstance(WorkerClass, str):
             # If we were passed a string for the WorkerClass, it is an import path
             # for where the Worker class can be found. Pass it to zprocess.Process,
@@ -527,10 +534,11 @@ class Tab(object):
                 startup_timeout=30,
                 subclass_fullname=WorkerClass
             )
+            self.worker_classes.append(WorkerClass)
         else:
             raise TypeError(WorkerClass)
         self.workers[name] = (worker,None,None)
-        self.event_queue.put(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL,True,False,[Tab._initialise_worker,[(name, workerargs),{}]], priority=-1)
+        self.event_queue.put(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL|MODE_POST_EXP|MODE_TRANSITION_TO_POST_EXP,True,False,[Tab._initialise_worker,[(name, workerargs),{}]], priority=-1)
        
     def _initialise_worker(self, worker_name, workerargs):
         tasks = []
@@ -539,7 +547,7 @@ class Tab(object):
         if self.error_message:
             raise Exception('Device failed to initialise')
                
-    @define_state(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL,True)  
+    @define_state(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL|MODE_POST_EXP|MODE_TRANSITION_TO_POST_EXP,True)  
     def _timeout_add(self,delay,execute_timeout):
         inmain(QTimer.singleShot, delay,execute_timeout)
     
@@ -589,7 +597,7 @@ class Tab(object):
             self._timeouts = set()
             return False        
     
-    @define_state(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL,True)
+    @define_state(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL|MODE_POST_EXP|MODE_TRANSITION_TO_POST_EXP,True)
     def shutdown_workers(self):
         """Ask all workers to shutdown"""
         tasks = []
@@ -616,7 +624,7 @@ class Tab(object):
         # In case the mainloop is blocking on the event queue, post a message to that
         # queue telling it to quit:
         if self._mainloop_thread.is_alive():
-            self.event_queue.put(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL,True,False,['_quit',None],priority=-1)
+            self.event_queue.put(MODE_MANUAL|MODE_BUFFERED|MODE_TRANSITION_TO_BUFFERED|MODE_TRANSITION_TO_MANUAL|MODE_POST_EXP|MODE_TRANSITION_TO_POST_EXP,True,False,['_quit',None],priority=-1)
         self.notebook = self._ui.parentWidget().parentWidget()
         currentpage = None
         if self.notebook:
@@ -833,6 +841,9 @@ class Tab(object):
                                 from_worker = workers[worker_process][2]
                                 to_worker.put(worker_arg_list)
                                 self.state = '%s (%s)'%(worker_function,worker_process)
+                                
+                                # TODO:OPT: Can speed things up further by queueing up all workers before waiting on 
+                                # each one to acknowledge the job request. However, this only saves <10ms. 
                                 # Confirm that the worker got the message:
                                 logger.debug('Waiting for worker to acknowledge job request')
                                 success, message, results = from_worker.get()
@@ -866,7 +877,7 @@ class Tab(object):
                             
                             generator.send(results_send_list)
                         except StopIteration:
-                            # The generator has finished.
+                            # The generator has finished. Stop the loop
                             logger.debug('Finalising function')
                             generator_running = False
                 self.state = 'idle'

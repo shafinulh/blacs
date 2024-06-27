@@ -61,8 +61,6 @@ class Plugin(object):
     def _abort(self):
         self.queue.put('abort')
 
-    # TODO:OPT: Is it really necessary to always check this property? Should avoid opening
-    # h5 file unnecessarily
     @callback(priority=100) # this callback should run after all other callbacks.
     def pre_transition_to_buffered(self, h5_filepath):
         # Delay according to the settings of the previously run shot, and save the

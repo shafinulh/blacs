@@ -469,6 +469,8 @@ class QueueManager(object):
         else:
             return False
 
+    # TODO: Need to make a decision to remove entirely as the GUI updates dont give much 
+    # useful information
     # @inmain_decorator(wait_for_return=True)
     def set_status(self, queue_status, shot_filepath=None):
         pass
@@ -529,7 +531,6 @@ class QueueManager(object):
         while self.manager_running:
             # If the pause button is pushed in, sleep
             if self.manager_paused:
-                
                 # If there are experiments still in the queue, BLACs tabs will not have transition_to_manual
                 # upon toggling the pause button
                 # Transition all the devices still in MODE_POST_EXP to manual mode so the user can regain control
@@ -618,7 +619,7 @@ class QueueManager(object):
                 error_condition = False
                 abort = False
                 restarted = False
-                self.set_status("Transitioning to buffered...", path)
+                # self.set_status("Transitioning to buffered...", path)
                 
                 # Enable abort button, and link in current_queue:
                 inmain(self._ui.queue_abort_button.clicked.connect,abort_function)
@@ -782,7 +783,7 @@ class QueueManager(object):
                 # Hack: Save time by not opening the h5 file to write front panel data. If this is important to you,
                 # uncomment this and the corresponding line that does the actual saving 
                 # states,tab_positions,window_data,plugin_data = self.BLACS.front_panel_settings.get_save_data()
-                self.set_status("Running (program time: %.3fs)..."%(time.time() - start_time), path)
+                # self.set_status("Running (program time: %.3fs)..."%(time.time() - start_time), path)
                     
                 # A Queue for event-based notification of when the experiment has finished.
                 experiment_finished_queue = queue.Queue()
@@ -848,7 +849,7 @@ class QueueManager(object):
                     continue                
                 
                 logger.info('Run complete')
-                self.set_status("Saving data...", path)
+                # self.set_status("Saving data...", path)
             # End try/except block here
             except Exception:
                 logger.exception("Error in queue manager execution. Queue paused.")
@@ -931,7 +932,7 @@ class QueueManager(object):
                 # they are all done or have all errored/restarted/failed. If one fails, we
                 # still have to transition the rest to manual mode:
                 # After the post_experiment state has been executed, implicitly transition to 
-                # manual if necessary 
+                # manual below if necessary 
                 while stop_groups:
                     transition_list = {}
                     # Transition the next group to manual mode:
@@ -1065,6 +1066,6 @@ class QueueManager(object):
                         self._logger.exception('Failed to copy h5_file (%s) for repeat run'%s)
                     logger.info(message)      
 
-            self.set_status("Idle")
+            # self.set_status("Idle")
         logger.info('Stopping')
 
