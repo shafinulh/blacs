@@ -248,6 +248,7 @@ class Tab(object):
         self._force_full_buffered_reprogram = True
         self.event_queue = StateQueue(self.device_name)
         self.workers = {}
+        self.worker_classes = [] # used to check existence of 'post_experiment' method in device worers
         self._supports_smart_programming = False
         self._restart_receiver = []
         self.shutdown_workers_complete = False
@@ -519,6 +520,7 @@ class Tab(object):
                 remote_process_client=self.remote_process_client,
                 startup_timeout=30
                 )
+            self.worker_classes.append(WorkerClass)
         elif isinstance(WorkerClass, str):
             # If we were passed a string for the WorkerClass, it is an import path
             # for where the Worker class can be found. Pass it to zprocess.Process,
@@ -530,6 +532,7 @@ class Tab(object):
                 startup_timeout=30,
                 subclass_fullname=WorkerClass
             )
+            self.worker_classes.append(WorkerClass)
         else:
             raise TypeError(WorkerClass)
         self.workers[name] = (worker,None,None)

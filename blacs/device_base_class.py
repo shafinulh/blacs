@@ -11,9 +11,11 @@
 #                                                                   #
 #####################################################################
 import logging
+import importlib
 import sys
 import os
 import time
+import warnings
 from queue import Queue
 
 from qtutils.qt.QtCore import *
@@ -35,6 +37,7 @@ from blacs.output_classes import AO, DO, DDS, Image
 from labscript_utils.qtwidgets.toolpalette import ToolPaletteGroup
 from labscript_utils.shared_drive import path_to_agnostic
 
+from labscript_utils import dedent
 
 class DeviceTab(Tab):
     def __init__(self,notebook,settings,restart=False):
@@ -715,6 +718,38 @@ class DeviceTab(Tab):
 
     @define_state(MODE_BUFFERED,False)
     def post_experiment(self,notify_queue,program=False,skip_manual=False):
+        # Ensure backwards compatibility: fallback to 'transition_to_manual' state 
+        # function if 'post_experiment' is not implemented in device workers.
+        # 
+        # Note: This check adds ~80ms overhead in the processing of the first shot of a
+        # sequence. If you choose to continue using this optimized BLACS flow, it is 
+        # recommended that you implement the post_experiment worker task for all your 
+        # devices and remove the need for this backwards compatibility check
+        old_state_flow = False
+        for worker_class in self.worker_classes:
+            exists = True
+            if isinstance(worker_class, str):
+                res = worker_class.rsplit('.', 1)
+                module = importlib.import_module(res[0])
+                worker_class_import = getattr(module, res[1])
+                exists = hasattr(worker_class_import, 'post_experiment')
+            else:
+                exists = hasattr(worker_class, 'post_experiment')
+
+            if not exists:
+                self.logger.debug(f"all workers: {self.worker_classes}")
+                msg = (
+                    f"Workers for device '{self.device_name}' do not have an implementation for the newly added "
+                    "`post_experiment` state. Reverting to `transition_to_manual` as per the original labscript state "
+                    "machine flow. Consider adding an implementation for `post_experiment` for improved performance."
+                )
+                warnings.warn(dedent(msg), RuntimeWarning)
+                old_state_flow = True
+                break
+        if old_state_flow:
+            self.transition_to_manual(notify_queue, program)
+            return
+
         self.mode = MODE_TRANSITION_TO_POST_EXP
         tasks = []
         tasks.append(self.queue_work(self._primary_worker,'post_experiment'))

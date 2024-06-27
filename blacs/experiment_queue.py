@@ -636,8 +636,8 @@ class QueueManager(object):
 
                 start_time = time.time()
                 
-                # TODO:OPT: opening this h5 file causes a 20ms delay. See blacs/performance_hacks
-                # for how to get around this.
+                # TODO:OPT: opening this h5 file causes a 40-60ms delay depending on your shot length. 
+                # See blacs/performance_hacks for how to get around this.
                 with h5py.File(path, 'r') as hdf5_file:
                     devices_in_use = {}
                     start_order = {}
