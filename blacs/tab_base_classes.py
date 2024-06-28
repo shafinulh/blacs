@@ -835,9 +835,6 @@ class Tab(object):
                                 to_worker.put(worker_arg_list)
                                 self.state = '%s (%s)'%(worker_function,worker_process)
                                 
-                                # TODO:OPT: Can speed things up further by queueing up all workers before waiting on 
-                                # each one to acknowledge the job request. However, this only saves <10ms. 
-                                # Confirm that the worker got the message:
                                 logger.debug('Waiting for worker to acknowledge job request')
                                 success, message, results = from_worker.get()
                                 if not success:
