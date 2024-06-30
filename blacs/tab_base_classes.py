@@ -799,18 +799,43 @@ class Tab(object):
                 logger.debug('Processing event %s' % func.__name__)
                 self.state = '%s (GUI)'%func.__name__
                 generator = func(self, *args, **kwargs)
-                # Do any work that was queued up:(we only talk to the worker if work has been queued up through the yield command)
-                # The yield command now passes along the work for all workers.
+                # Process any work that was queued up:
+                # We only communicate with the worker if work has been queued up through the yield command.
+                # 
+                # The new API expects the yield command to pass along the work for all workers. As such, the yield command should queue
+                # up the following tuple: (worker_tasks, check_main_first).
+                #
+                # Args:
+                #   worker_tasks (list): A list of worker tasks, each involving worker_process, worker_function, worker_args, and worker_kwargs
+                #                        as before.
+                #   check_main_first (bool): If True, the main worker must be successful before processing all other workers. If it is
+                #                            not, we exit without checking the status of secondary workers.
+                #
+                # Returns:
+                #   results_send_list (list): A list of the results that were returned by the workers. The state function implementations have been modified
+                #                      to unpack the results appropriately.
+                # 
+                # Ensure backwards compatibility:
+                # If we don't receive the aforementioned ([list], bool) tuple, we can fall back to accepting yield commands from State Functions that
+                # queue up a single worker at a time. If this is the case, we also fall back to passing the results from the worker one at a time.
                 if type(generator) == GeneratorType:
                     generator_running = True
-                    # We only need to call next once to get the data from the first and only yield function 
-                    # The second call to next will complete the GUI operations associated with the device
-                    # and return the StopIteration command
+                    check_main_first = False
+                    old_worker_flow = False
+                    active_workers = []
+                    results_send_list = []
+                    queued_work = generator.__next__()
+                    # Check format of yield command:
+                    if isinstance(queued_work[0], list) and len(queued_work) == 2:
+                        worker_tasks, check_main_first = queued_work
+                    elif isinstance(queued_work, tuple):
+                        old_worker_flow = True
+                        worker_tasks = [queued_work]
+                    else:
+                        raise Exception("""Invalid yield command: Expected a tuple ([worker_tasks], check_main_first) 
+                                        for the new API or a single worker task for the old API.""")
                     while generator_running:
                         try:
-                            results_list = []
-                            results_send_list = []
-                            worker_tasks, check_first = generator.__next__()
                             for worker_task in worker_tasks:
                                 worker_process,worker_function,worker_args,worker_kwargs = worker_task
                                 logger.debug('Instructing worker %s to do job %s'%(worker_process,worker_function) )
@@ -842,9 +867,9 @@ class Tab(object):
                                     raise Exception(message)
                                 logger.debug('Worker reported job started, waiting for completion')
 
-                                results_list.append((worker_process, from_worker))
+                                active_workers.append((worker_process, from_worker))
 
-                            for worker_process, from_worker in results_list:
+                            for worker_process, from_worker in active_workers:
                                 success, message, results = from_worker.get()
                                 if not success:
                                     logger.info('Worker reported exception during job')
@@ -856,16 +881,25 @@ class Tab(object):
                                 
                                 # Prepare to send the results back to the GUI function
                                 results_send_list.append(results)
-                                if (worker_process == "main_worker" and check_first) and (results == False or results == None):
+                                if (worker_process == "main_worker" and check_main_first) and (results == False or results == None):
                                     # Do not process the other worker events, just send back the faulty state
                                     break
 
                             # Reset the hide_not_responding_error_until, since we have now heard from the child                        
                             self.hide_not_responding_error_until = 0
+
+                            # Send the results back to the GUI function
                             logger.debug('returning worker results to function %s' % func.__name__)
                             self.state = '%s (GUI)'%func.__name__
                             
-                            generator.send(results_send_list)
+                            if old_worker_flow:
+                                next_yield = generator.send(results_send_list[0])
+                            else:
+                                next_yield = generator.send(results_send_list)
+
+                            if next_yield:
+                                assert old_worker_flow, "should only recieve a second yield in the old worker flow that queues up workers serially"
+                                worker_tasks = [next_yield]
                         except StopIteration:
                             # The generator has finished. Stop the loop
                             logger.debug('Finalising function')
