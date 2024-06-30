@@ -358,7 +358,7 @@ class AO(object):
     def value(self):
         return self._current_value
         
-    def set_value(self, value, unit=None, program=True):
+    def set_value(self, value, unit=None, program=True, update_gui=True):
         # conversion to float means a string can be passed in too:
         value = float(value)
         
@@ -373,14 +373,15 @@ class AO(object):
         if program:
             self._logger.debug('program device called')
             self._program_device()
-            
-        for widget in self._widgets:
-            # block signals
-            widget.block_spinbox_signals()
-            # update widget
-            widget.set_spinbox_value(value,unit if unit is not None else self._base_unit)
-            # unblock signals            
-            widget.unblock_spinbox_signals()
+        
+        if update_gui:
+            for widget in self._widgets:
+                # block signals
+                widget.block_spinbox_signals()
+                # update widget
+                widget.set_spinbox_value(value,unit if unit is not None else self._base_unit)
+                # unblock signals            
+                widget.unblock_spinbox_signals()
     
     def set_step_size(self,step_size,unit):
         self._logger.debug('set_step_size called. step_size: %f, unit: %s'%(step_size,unit))
@@ -527,7 +528,7 @@ class DO(object):
         # update the settings dictionary if it exists, to maintain continuity on tab restarts
         self._settings['locked'] = locked
             
-    def set_value(self,state,program=True):
+    def set_value(self,state,program=True,update_gui=True):
         # conversion to integer, then bool means we can safely pass in
         # either a string '1' or '0', True or False or 1 or 0
         state = bool(int(state))
@@ -541,12 +542,13 @@ class DO(object):
         if program:            
             self._logger.debug('program device called')
             self._program_device()
-            
-        for widget in self._widget_list:
-            if state != widget.state:
-                widget.blockSignals(True)
-                widget.state = state
-                widget.blockSignals(False)
+        
+        if update_gui:
+            for widget in self._widget_list:
+                if state != widget.state:
+                    widget.blockSignals(True)
+                    widget.state = state
+                    widget.blockSignals(False)
    
     @property
     def name(self):
@@ -649,7 +651,7 @@ class Image(object):
         # update the settings dictionary if it exists, to maintain continuity on tab restarts
         self._settings['locked'] = locked
         
-    def set_value(self, value, program = True):
+    def set_value(self, value, program = True, update_gui=True):
         value = str(value)  
         
         # We are programatically setting the value, so break the check lock function logic
@@ -661,12 +663,13 @@ class Image(object):
         if program:            
             self._logger.debug('program device called')
             self._program_device()
-            
-        for widget in self._widget_list:
-            if value != widget.value:
-                widget.blockSignals(True)
-                widget.value = value
-                widget.blockSignals(False)
+
+        if update_gui:  
+            for widget in self._widget_list:
+                if value != widget.value:
+                    widget.blockSignals(True)
+                    widget.value = value
+                    widget.blockSignals(False)
         
     @property
     def name(self):
@@ -741,11 +744,11 @@ class DDS(object):
                 value[subchnl] = getattr(self,subchnl).value
         return value
         
-    def set_value(self,value,program=True):
+    def set_value(self,value,program=True,update_gui=True):
         for subchnl in self._sub_channel_list:
             if subchnl in value:
                 if hasattr(self,subchnl):
-                    getattr(self,subchnl).set_value(value[subchnl],program=program)
+                    getattr(self,subchnl).set_value(value[subchnl],program=program,update_gui=update_gui)
                     
     @property
     def name(self):
