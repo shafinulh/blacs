@@ -619,7 +619,7 @@ class QueueManager(object):
                 error_condition = False
                 abort = False
                 restarted = False
-                # self.set_status("Transitioning to buffered...", path)
+                self.set_status("Transitioning to buffered...", path)
                 
                 # Enable abort button, and link in current_queue:
                 inmain(self._ui.queue_abort_button.clicked.connect,abort_function)
@@ -778,12 +778,9 @@ class QueueManager(object):
                 #                                                             SCIENCE!                                                                   #
                 ##########################################################################################################################################
             
-                # Get front panel data, but don't save it to the h5 file until the experiment ends:
-
-                # Hack: Save time by not opening the h5 file to write front panel data. If this is important to you,
-                # uncomment this and the corresponding line that does the actual saving 
-                # states,tab_positions,window_data,plugin_data = self.BLACS.front_panel_settings.get_save_data()
-                # self.set_status("Running (program time: %.3fs)..."%(time.time() - start_time), path)
+                # Get front panel data, but don't save it to the h5 file until the experiment ends: 
+                states,tab_positions,window_data,plugin_data = self.BLACS.front_panel_settings.get_save_data()
+                self.set_status("Running (program time: %.3fs)..."%(time.time() - start_time), path)
                     
                 # A Queue for event-based notification of when the experiment has finished.
                 experiment_finished_queue = queue.Queue()
@@ -912,8 +909,7 @@ class QueueManager(object):
             # start new try/except block here                   
             try:
                 with h5py.File(path,'r+') as hdf5_file:
-                    # Hack: Save time by not opening h5 file to write front panel data
-                    # self.BLACS.front_panel_settings.store_front_panel_in_h5(hdf5_file,states,tab_positions,window_data,plugin_data,save_conn_table=False, save_queue_data=False)
+                    self.BLACS.front_panel_settings.store_front_panel_in_h5(hdf5_file,states,tab_positions,window_data,plugin_data,save_conn_table=False, save_queue_data=False)
 
                     data_group = hdf5_file['/'].create_group('data')
                     # stamp with the run time of the experiment
@@ -1066,6 +1062,6 @@ class QueueManager(object):
                         self._logger.exception('Failed to copy h5_file (%s) for repeat run'%s)
                     logger.info(message)      
 
-            # self.set_status("Idle")
+            self.set_status("Idle")
         logger.info('Stopping')
 
