@@ -18,7 +18,7 @@
 
 ## My Fork
 
-This fork aims to optimize the performance of BLACS by reducing the overhead between the execution of experimental shots, which is critical for time-sensitive workflows. While the labscript suite is very well-developed, user-friendly, and supports all general workflows, optimizing this specific workflow can significantly improve efficiency during high-throughput experimental sequence runs.
+This fork aims to optimize the performance of BLACS by reducing the overhead between the execution of experimental shots, particularly when we want to process a large sequence. While the labscript suite is very well-developed, user-friendly, and supports all general workflows, optimizing this specific workflow can significantly improve efficiency during high-throughput experimental sequence runs.
 
 The key areas of BLACS identified for potential improvements are:
 
@@ -30,7 +30,7 @@ The following sections provide a detailed motivation for these changes, describe
 
 ## 1. State Machine
 
-The first bottleneck occurs during the transition to the `manual mode` state at the end of each shot (Figure 1). `mManual mode` allows the user to provide manual control over devices between experiment shots. The problem arises when there are multiple shots in the queue, in which case after the `transition_to_manual` we immediately call `transition_to_buffered` negating the need for manual contro. It is clear that this transition is unnecessary when shots are queued.
+The first bottleneck occurs during the transition to the `manual mode` state at the end of each shot (Figure 1). `Manual mode` allows the user to provide manual control over devices between experiment shots. The problem arises when there are multiple shots in the queue, in which case after the `transition_to_manual` we immediately call `transition_to_buffered` negating the need for manual contro. It is clear that this transition is unnecessary when shots are queued.
 
 However, it is not as simple as removing the `transition_to_manual` when it is not needed due to the fact that `transition_to_manual` is a "compound" state transition - it has multiple functionalities. It is responsible for post-processing experiment data (saving acquired data, images, etc.), updating internal flags/variables of the device, and programming the devices to operate in manual mode.
 
