@@ -25,7 +25,7 @@ from qtutils.qt.QtWidgets import *
 import labscript_utils.excepthook
 from qtutils import UiLoader
 
-from qtutils import qtlock
+from qtutils import qtlock, inmain_decorator, inmain
 
 try:
     from blacs import BLACS_DIR
@@ -63,12 +63,12 @@ class DeviceTab(Tab):
         self.restore_save_data(self.settings['saved_data'] if 'saved_data' in self.settings else {})
         self.initialise_workers()
         self._last_programmed_values = self.get_front_panel_values()
-        if self._can_check_remote_values:
-            self.statemachine_timeout_add(30000,self.check_remote_values)     
-        else:       
-            # If we can check remote values, then no need to call program manual as 
-            # the remote device will either be programmed correctly, or will need an 
-            # inconsistency between local and remote values resolved
+        if not self._can_check_remote_values:
+        #     self.statemachine_timeout_add(30000,self.check_remote_values)     
+        # else:       
+        #     # If we can check remote values, then no need to call program manual as 
+        #     # the remote device will either be programmed correctly, or will need an 
+        #     # inconsistency between local and remote values resolved
             self.program_device()
             
     def initialise_GUI(self):
@@ -279,6 +279,20 @@ class DeviceTab(Tab):
         
         return widgets
     
+    def create_subset_widgets(self, subset_widgets):
+        ao_properties = {}
+        for channel,output in self._AO.items():
+            if channel in subset_widgets.keys():
+                ao_properties[channel] = {}
+        ao_widgets = self.create_analog_widgets(ao_properties)
+
+        # Hack to maintain backwards compatibility with devices implemented
+        # prior to the introduction of the IMAGE output class 
+        if self._image:
+            return None, ao_widgets, None, None
+        else:
+            return None, ao_widgets, None
+    
     def auto_create_widgets(self):
         dds_properties = {}
         for channel,output in self._DDS.items():
@@ -458,13 +472,17 @@ class DeviceTab(Tab):
         # filling up the text box with the same error, eventually consuming all CPU/memory of the PC
         if not self._last_remote_values or type(self._last_remote_values) != type({}):
             raise Exception('Failed to get remote values from device. Is it still connected?')
-            
+        
+        inmain(self.modify_gui)
+
+    def modify_gui(self):
         # A variable to indicate if any of the channels have a changed value
         overall_changed = False
             
         # A place to store radio buttons in
         self._changed_radio_buttons = {}
-            
+        
+        # with qtlock:
         # Clean up the previously used layout
         while not self._ui.changed_layout.isEmpty():
             item = self._ui.changed_layout.itemAt(0)
@@ -749,6 +767,7 @@ class DeviceTab(Tab):
                 break
         if old_state_flow:
             self.transition_to_manual(notify_queue, program)
+            yield None
             return
 
         self.mode = MODE_TRANSITION_TO_POST_EXP
