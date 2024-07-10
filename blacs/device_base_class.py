@@ -451,6 +451,49 @@ class DeviceTab(Tab):
                         # Update the last_programmed_values            
                         self._last_programmed_values[channel] = remote_value
     
+    @define_state(MODE_MANUAL|MODE_POST_EXP, True)
+    def check_remote_values_allowed(self):
+        tasks = []
+
+        tasks.append(self.queue_work(self._primary_worker,'check_remote_values'))
+        for worker in self._secondary_workers:
+            tasks.append(self.queue_work(worker,'check_remote_values'))
+        
+        raw_results = yield(tasks, True)
+        self._last_remote_values = raw_results[0]
+        if self._last_remote_values and len(raw_results) > 1:
+            for res in raw_results[1:]:
+                self._last_remote_values.update(res)
+        # compare to current front panel values and prompt the user if they don't match
+        # We compare to the last_programmed values so that it doesn't get confused if the 
+        # user has changed the value on the front panel and the program_manual command is 
+        # still queued up
+        
+        # If no results were returned, raise an exception so that we don't keep calling this function over and over again, 
+        # filling up the text box with the same error, eventually consuming all CPU/memory of the PC
+        if not self._last_remote_values or type(self._last_remote_values) != type({}):
+            raise Exception('Failed to get remote values from device. Is it still connected?')
+        
+        inmain(self.modify_gui_allowed)
+    
+    def modify_gui_allowed(self):
+        for channel in sorted(self._last_remote_values):
+            remote_value = self._last_remote_values[channel]
+            if channel not in self._last_programmed_values:
+                raise RuntimeError('The worker function check_remote_values for device %s is returning data for channel %s but the BLACS tab is not programmed to handle this channel'%(self.device_name,channel))
+            
+            if channel in self._AO:
+                # A intermediately complicated case!
+                front_value = ("%."+str(self._AO[channel]._decimals)+"f")%self._last_programmed_values[channel]
+                remote_value = ("%."+str(self._AO[channel]._decimals)+"f")%remote_value
+                if front_value != remote_value:
+                    output = self.get_channel(channel)
+                    output.set_value(remote_value,program=False)
+            else:
+                raise RuntimeError('device_base_class.py is not programmed to handle channel types other than DDS, AO and DO in check_remote_values')
+
+        self._last_programmed_values = self.get_front_panel_values()
+
     @define_state(MODE_MANUAL,True)
     def check_remote_values(self):
         tasks = []

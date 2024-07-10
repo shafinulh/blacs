@@ -376,8 +376,10 @@ class AO(object):
             self._logger.debug('program device called')
             self._program_device()
         
+        self._logger.debug("in set_value")
         with qtlock:
             if update_gui:
+                self._logger.debug(f"updating set_value with {value}")
                 for widget in self._widgets:
                     # block signals
                     widget.block_spinbox_signals()
