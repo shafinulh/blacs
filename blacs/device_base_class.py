@@ -755,6 +755,7 @@ class DeviceTab(Tab):
                 break
         if old_state_flow:
             self.transition_to_manual(notify_queue, program)
+            yield None
             return
 
         self.mode = MODE_TRANSITION_TO_POST_EXP
