@@ -18,6 +18,7 @@ from qtutils.qt.QtCore import *
 from qtutils.qt.QtGui import *
 from qtutils.qt.QtWidgets import *
 
+from qtutils import qtlock
 
 from labscript_utils.qtwidgets.analogoutput import AnalogOutput
 from labscript_utils.qtwidgets.digitaloutput import DigitalOutput, InvertedDigitalOutput
@@ -374,14 +375,15 @@ class AO(object):
             self._logger.debug('program device called')
             self._program_device()
         
-        if update_gui:
-            for widget in self._widgets:
-                # block signals
-                widget.block_spinbox_signals()
-                # update widget
-                widget.set_spinbox_value(value,unit if unit is not None else self._base_unit)
-                # unblock signals            
-                widget.unblock_spinbox_signals()
+        with qtlock:
+            if update_gui:
+                for widget in self._widgets:
+                    # block signals
+                    widget.block_spinbox_signals()
+                    # update widget
+                    widget.set_spinbox_value(value,unit if unit is not None else self._base_unit)
+                    # unblock signals            
+                    widget.unblock_spinbox_signals()
     
     def set_step_size(self,step_size,unit):
         self._logger.debug('set_step_size called. step_size: %f, unit: %s'%(step_size,unit))
@@ -543,12 +545,13 @@ class DO(object):
             self._logger.debug('program device called')
             self._program_device()
         
-        if update_gui:
-            for widget in self._widget_list:
-                if state != widget.state:
-                    widget.blockSignals(True)
-                    widget.state = state
-                    widget.blockSignals(False)
+        with qtlock:
+            if update_gui:
+                for widget in self._widget_list:
+                    if state != widget.state:
+                        widget.blockSignals(True)
+                        widget.state = state
+                        widget.blockSignals(False)
    
     @property
     def name(self):
@@ -663,13 +666,14 @@ class Image(object):
         if program:            
             self._logger.debug('program device called')
             self._program_device()
-
-        if update_gui:  
-            for widget in self._widget_list:
-                if value != widget.value:
-                    widget.blockSignals(True)
-                    widget.value = value
-                    widget.blockSignals(False)
+        
+        with qtlock:
+            if update_gui:  
+                for widget in self._widget_list:
+                    if value != widget.value:
+                        widget.blockSignals(True)
+                        widget.value = value
+                        widget.blockSignals(False)
         
     @property
     def name(self):
