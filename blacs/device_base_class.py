@@ -462,7 +462,7 @@ class DeviceTab(Tab):
         # the check_remote_values GUI function requires a lot of GUI updates. It was not possible to update
         # the self._ui.changed_layout using local qtlock blocks.
         # Call GUI modifications inmain
-        inmain(self.check_remote_values_modify_gui)
+        inmain(self.modify_gui)
     
     def modify_gui(self):
         # A variable to indicate if any of the channels have a changed value
