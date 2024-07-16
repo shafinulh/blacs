@@ -20,7 +20,6 @@ from qtutils.qt.QtWidgets import *
 
 from qtutils import qtlock
 
-
 from labscript_utils.qtwidgets.analogoutput import AnalogOutput
 from labscript_utils.qtwidgets.digitaloutput import DigitalOutput, InvertedDigitalOutput
 from labscript_utils.qtwidgets.ddsoutput import DDSOutput
@@ -546,12 +545,13 @@ class DO(object):
             self._logger.debug('program device called')
             self._program_device()
         
-        if update_gui:
-            for widget in self._widget_list:
-                if state != widget.state:
-                    widget.blockSignals(True)
-                    widget.state = state
-                    widget.blockSignals(False)
+        with qtlock:
+            if update_gui:
+                for widget in self._widget_list:
+                    if state != widget.state:
+                        widget.blockSignals(True)
+                        widget.state = state
+                        widget.blockSignals(False)
    
     @property
     def name(self):
@@ -666,13 +666,14 @@ class Image(object):
         if program:            
             self._logger.debug('program device called')
             self._program_device()
-
-        if update_gui:  
-            for widget in self._widget_list:
-                if value != widget.value:
-                    widget.blockSignals(True)
-                    widget.value = value
-                    widget.blockSignals(False)
+        
+        with qtlock:
+            if update_gui:  
+                for widget in self._widget_list:
+                    if value != widget.value:
+                        widget.blockSignals(True)
+                        widget.value = value
+                        widget.blockSignals(False)
         
     @property
     def name(self):

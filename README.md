@@ -22,9 +22,9 @@ This fork aims to optimize the performance of BLACS by reducing the overhead bet
 
 The key areas of BLACS identified for potential improvements are:
 
-1. State Machine: Streamlining state transitions to minimize latency.
-2. Reliance on QT Main Thread: Reducing dependency on the main thread to prevent bottlenecks.
-3. Worker Processes: Enhancing the efficiency of worker processes to better handle concurrent tasks.
+1. **State Machine**: Streamlining state transitions to minimize latency.
+2. **Reliance on QT Main Thread**: Reducing dependency on the main thread to prevent bottlenecks.
+3. **Worker Processes**: Enhancing the efficiency of worker processes to better handle concurrent tasks.
 
 The following sections provide a detailed motivation for these changes, describe the current implementations, and outline the proposed optimizations.
 
@@ -65,10 +65,10 @@ Fallback to `transition_to_manual` state function execution if `post_experiment`
 
 ## 2. QT Main Thread
 
-Almost all functionality is queued for execution on the QT Main Thread. The developers likely did this for two reasons:
+Almost all functionality is queued for execution on the `QT.MainThread`. The developers likely did this for two reasons:
 
 * To ensure all GUI modifications occur on a single thread.
-* To serialize operations on a single thread, maintaining the thread safety of non-GUI objects (e.g., StateQueue).
+* To serialize operations on a single thread, maintaining the thread safety of non-GUI objects (e.g., `StateQueue`).
 
 Scheduling everything on a single thread introduces non-negligble context switching overhead. Many functions scheduled with `inmain` do not interact with the GUI or non-thread-safe objects, causing unnecessary delays in their execution. This scheduling delay results in approximately 20-30ms of slowdown for each shot.
 
@@ -80,13 +80,13 @@ Scheduling everything on a single thread introduces non-negligble context switch
 2024-06-04 17:02:47,115 DEBUG BLACS.ni_6363_main_worker.worker: Starting job _transition_to_buffered
 2024-06-04 17:02:47,126 DEBUG BLACS.pb.mainloop: Instructing worker main_worker to do job _transition_to_buffered
 ```
-* The `ni_6363.mainloop` schedules the generator function on the MainThread after line 1. We see an unnecessary 10ms delay while the generator is scheduled and executed before and we can start the `ni_6363_main_worker` process.
+* The `ni_6363.mainloop` schedules the generator function on the `QT.MainThread` after line 1. We see an unnecessary 10ms delay while the generator is scheduled and executed before and we can start the `ni_6363_main_worker` process.
 * The `pb.mainloop` is not able to start until the generator executes on the MainThread since the `StateQueue.get` must also occur on the MainThread. It is clear we are not maximizing the concurrency of our program.  
 
 ### Proposed Solution
 
 I removed the `inmain` decorators allowing function execution from various threads such as the `DeviceTab.mainloop`s and `ExperimentQueue.manager`. To address the developers' concerns I have made the following changes:
-* Added fine-grain locks for the QT Application GUI. Instead of scheduling an entire function that has one line that modifies the GUI on the MainThread, we now grab the QTlock before making any GUI update.
+* Added fine-grain locks for the QT Application GUI. Instead of scheduling an entire function that has one line that modifies the GUI on the MainThread, we now grab the `QTlock` before making any GUI update.
 * Implemented a thread-safe Single-Consumer Multi-Producer StateQueue object using local locks.
 
 Here is an example of the log prints after the change 
@@ -109,7 +109,7 @@ For devices with multiple workers, tasks are processed serially. We grab a singl
 
 ### Proposed Solution
 
-The DeviceTab.mainloop that processes the State GUI generator function now expects to receive a list of all worker tasks (Figure 2). These tasks are then scheduled simultaneously, and the results of each worker are returned in a list.
+The `DeviceTab.mainloop` that processes the State GUI generator function now expects to receive a list of all worker tasks (Figure 2). These tasks are then scheduled simultaneously, and the results of each worker are returned in a list.
 
 This change means the worker processing time is no longer the sum of all workers' times but is instead bound by the longest worker's processing time.
 
@@ -130,13 +130,13 @@ Fallback to accepting a single worker task at a time if the State GUI generator 
 
 Overall, these changes reduce the overhead between shots in our experimental setup from **380ms to 220ms**. With additional performance hacks, the overhead is closer to **170ms**.
 
-It should be noted that the impact of some optimizations is specific to the experimental setup and the hardware/functionalities being used. For example, if you have no devices with multiple workers, the worker parallelization change will not affect you. Therefore, you may not see the same level of improvement I achieved when applying these optimizations to your experiment.
+It should be noted that the impact of some optimizations are specific to the experimental setup and the hardware/functionalities being used. For example, if you have no devices with multiple workers, the worker parallelization change will not affect you. Therefore, you may not see the same level of improvement I achieved when applying these optimizations to your experiment.
 
 ## Things I am looking into (performance or otherwise)
 
 - **Plugin Implementation for "Sequence Device-List"**: To properly address the optimization in section 4.1, allowing users to define the devices for their experimental sequence. 
 - **DeviceTab for Remote Operation**: Developing a DeviceTab for remote control of pre-existing experiment control GUI software (e.g., LabVIEW laser locking, Laser Raster software). Should be a lot more convenient compared to re-creating the GUI in a BLACS tab.
-- Fast Visualization of Experiment Data: Creating a quick method to visualize raw or lightly-processed experiment data (e.g., analog input graphs) between shots.
+- **Fast Visualization of Experiment Data**: Creating a quick method to visualize raw or lightly-processed experiment data (e.g., analog input graphs) between shots.
   - A faster alternative to Lyse, which can lag behind in fast repetition rate executions.
   - Aimed at providing immediate feedback to experimenters during prototyping, with no requirement to save the data.
   
@@ -148,7 +148,7 @@ To install this fork, follow the same procedure as for the BLACS developer insta
 
 This fork is designed to work out of the box, thanks to the backward compatibility integrated into all my changes. You should see performance improvements using the master branch of the fork. Any necessary changes would be to the devices and state functions not already modified. New devices should implement the `post_experiment` state task in their workers as described in section 1. Additionally, state generator functions should be updated to pass all worker tasks simultaneously.
 
-Further performance improvements can be achieved using the performance_hacks branch, but it may require some additional modifications to function correctly. Comments have been added to facilitate this process.
+Further performance improvements can be achieved using the `performance_hacks` branch, but it may require some additional modifications to function correctly. Comments have been added in the source code to facilitate this process.
 
 ## Disclaimer
 My changes have not been thoroughly tested across a broad range of experimental hardware or workflows. I appreciate your help in testing these changes and welcome any bug reports! 

@@ -25,7 +25,7 @@ from qtutils.qt.QtWidgets import *
 import labscript_utils.excepthook
 from qtutils import UiLoader
 
-from qtutils import qtlock, inmain_decorator, inmain
+from qtutils import inmain, inmain_decorator, qtlock
 
 try:
     from blacs import BLACS_DIR
@@ -516,8 +516,11 @@ class DeviceTab(Tab):
         if not self._last_remote_values or type(self._last_remote_values) != type({}):
             raise Exception('Failed to get remote values from device. Is it still connected?')
         
+        # the check_remote_values GUI function requires a lot of GUI updates. It was not possible to update
+        # the self._ui.changed_layout using local qtlock blocks.
+        # Call GUI modifications inmain
         inmain(self.modify_gui)
-
+    
     def modify_gui(self):
         # A variable to indicate if any of the channels have a changed value
         overall_changed = False
