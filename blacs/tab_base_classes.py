@@ -826,7 +826,10 @@ class Tab(object):
                     results_send_list = []
                     queued_work = generator.__next__()
                     # Check format of yield command:
-                    if isinstance(queued_work[0], list) and len(queued_work) == 2:
+                    if queued_work == None:
+                        # Support for backwards compatibility, do not process generator
+                        generator_running = False    
+                    elif isinstance(queued_work[0], list) and len(queued_work) == 2:
                         worker_tasks, check_main_first = queued_work
                     elif isinstance(queued_work, tuple):
                         old_worker_flow = True
