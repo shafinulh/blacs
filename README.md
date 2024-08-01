@@ -28,6 +28,25 @@ The key areas of BLACS identified for potential improvements are:
 
 The following sections provide a detailed motivation for these changes, describe the current implementations, and outline the proposed optimizations.
 
+## Performance Improvements Overview
+
+The following demonstration visualizes the overall impact of the optimizations. Each GIF shows BLACS executing 20 experimental shots queued up from Runmanager, each 23ms long. These experiments utilize a single NI PCIe-6363 Multifunction card, outputting Analog and Digital signals and collecting Analog inputs at maximum sampling rates.
+
+<div style="display: flex; justify-content: space-between;">
+    <img src="readme_images/blacs_default_2-266hz.gif" alt="Default Labscript Branch Demo" width="32%">
+    <img src="readme_images/blacs_master_5-66Hz.gif" alt="Master Branch Demo" width="32%">
+    <img src="readme_images/blacs_perf_6-50Hz.gif" alt="Performance Hacks Branch Demo" width="32%">
+</div>
+
+*BLACS state machine operating at **2.27Hz**, **5.66Hz**, and **6.50Hz** for `default_labscript`, `master`, and `performance_hacks` branches respectively.*
+
+**Branch Descriptions:**
+- `default_labscript`: Most up-to-date official branch
+- `master`: Includes all changes described in this document
+- `performance_hacks`: All `master` changes plus optimizations discussed in section 4
+
+It's important to note that while the execution speed varies, the functionality and output remain identical across all three branches.
+
 ## 1. State Machine
 
 The first bottleneck occurs during the transition to the `manual mode` state at the end of each shot (Figure 1). `Manual mode` allows the user to provide manual control over devices between experiment shots. The problem arises when there are multiple shots in the queue, in which case after the `transition_to_manual` we immediately call `transition_to_buffered` negating the need for manual contro. It is clear that this transition is unnecessary when shots are queued.

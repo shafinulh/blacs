@@ -833,13 +833,13 @@ class DeviceTab(Tab):
                 # grab the QTlock and update the GUI.
                 for channel, value in self._final_values.items():
                     if channel in self._AO:
-                        self._AO[channel].set_value(value,program=False,update_gui=False)
+                        self._AO[channel].set_value(value,program=False,update_gui=True)
                     elif channel in self._DO:
-                        self._DO[channel].set_value(value,program=False,update_gui=False)
+                        self._DO[channel].set_value(value,program=False,update_gui=True)
                     elif channel in self._image:
-                        self._image[channel].set_value(value,program=False,update_gui=False)
+                        self._image[channel].set_value(value,program=False,update_gui=True)
                     elif channel in self._DDS:
-                        self._DDS[channel].set_value(value,program=False,update_gui=False)
+                        self._DDS[channel].set_value(value,program=False,update_gui=True)
 
                 # Do not transition_to_manual, continue state machine flow from
                 # the MODE_POST_EXP state
