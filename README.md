@@ -34,11 +34,11 @@ The following demonstration visualizes the overall impact of the optimizations. 
 
 <div style="display: flex; justify-content: space-between;">
     <img src="readme_images/blacs_default_2-266hz.gif" alt="Default Labscript Branch Demo" width="32%">
-    <img src="readme_images/blacs_master_4-733hz.gif" alt="Master Branch Demo" width="32%">
-    <img src="readme_images/blacs_perf_5-48hz.gif" alt="Performance Hacks Branch Demo" width="32%">
+    <img src="readme_images/blacs_master_5-66Hz.gif" alt="Master Branch Demo" width="32%">
+    <img src="readme_images/blacs_perf_6-50Hz.gif" alt="Performance Hacks Branch Demo" width="32%">
 </div>
 
-*BLACS state machine operating at **2.27Hz**, **4.73Hz**, and **5.48Hz** for `default_labscript`, `master`, and `performance_hacks` branches respectively.*
+*BLACS state machine operating at **2.27Hz**, **5.66Hz**, and **6.50Hz** for `default_labscript`, `master`, and `performance_hacks` branches respectively.*
 
 **Branch Descriptions:**
 - `default_labscript`: Most up-to-date official branch
