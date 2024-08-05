@@ -361,6 +361,8 @@ class DeviceTab(Tab):
         # Add the widget containing the toolpalettegroup to the tab layout
         self.get_tab_layout().addWidget(widget)
         self.get_tab_layout().addItem(QSpacerItem(0,0,QSizePolicy.Minimum,QSizePolicy.MinimumExpanding))
+
+        return widget
     
     # This method should be overridden in your device class if you want to save any data not
     # stored in an AO, DO, Image or DDS object

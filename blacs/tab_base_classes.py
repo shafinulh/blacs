@@ -106,8 +106,7 @@ class StateQueue(object):
         be executed before any states with higher numbers for their priority
         """
         with self._state_added:
-            # State data is sorted into the queue first by priority and then by
-            # order added.
+            # State data is sorted into the queue first by priority and then by order added.
             state_data = [priority, get_unique_id(), allowed_states, queue_state_indefinitely, delete_stale_states,data]
             # Insert the task into the queue, retaining sort order first by priority and then by order added:
             insort(self.list_of_states, state_data)
