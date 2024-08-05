@@ -63,12 +63,12 @@ class DeviceTab(Tab):
         self.restore_save_data(self.settings['saved_data'] if 'saved_data' in self.settings else {})
         self.initialise_workers()
         self._last_programmed_values = self.get_front_panel_values()
-        if not self._can_check_remote_values:
-        #     self.statemachine_timeout_add(30000,self.check_remote_values)     
-        # else:       
-        #     # If we can check remote values, then no need to call program manual as 
-        #     # the remote device will either be programmed correctly, or will need an 
-        #     # inconsistency between local and remote values resolved
+        if self._can_check_remote_values:
+            self.statemachine_timeout_add(30000,self.check_remote_values)     
+        else:       
+            # If we can check remote values, then no need to call program manual as 
+            # the remote device will either be programmed correctly, or will need an 
+            # inconsistency between local and remote values resolved
             self.program_device()
             
     def initialise_GUI(self):
