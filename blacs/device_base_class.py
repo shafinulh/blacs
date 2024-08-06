@@ -279,6 +279,20 @@ class DeviceTab(Tab):
         
         return widgets
     
+    def create_subset_widgets(self, subset_widgets):
+        ao_properties = {}
+        for channel,output in self._AO.items():
+            if channel in subset_widgets.keys():
+                ao_properties[channel] = {}
+        ao_widgets = self.create_analog_widgets(ao_properties)
+
+        # Hack to maintain backwards compatibility with devices implemented
+        # prior to the introduction of the IMAGE output class 
+        if self._image:
+            return None, ao_widgets, None, None
+        else:
+            return None, ao_widgets, None
+    
     def auto_create_widgets(self):
         dds_properties = {}
         for channel,output in self._DDS.items():
@@ -347,6 +361,8 @@ class DeviceTab(Tab):
         # Add the widget containing the toolpalettegroup to the tab layout
         self.get_tab_layout().addWidget(widget)
         self.get_tab_layout().addItem(QSpacerItem(0,0,QSizePolicy.Minimum,QSizePolicy.MinimumExpanding))
+
+        return widget
     
     # This method should be overridden in your device class if you want to save any data not
     # stored in an AO, DO, Image or DDS object
@@ -436,9 +452,9 @@ class DeviceTab(Tab):
             
                         # Update the last_programmed_values            
                         self._last_programmed_values[channel] = remote_value
-    
-    @define_state(MODE_MANUAL,True)
-    def check_remote_values(self):
+
+    @define_state(MODE_MANUAL|MODE_POST_EXP,True)
+    def check_remote_values(self, auto_update=False):
         tasks = []
 
         tasks.append(self.queue_work(self._primary_worker,'check_remote_values'))
@@ -460,17 +476,38 @@ class DeviceTab(Tab):
             raise Exception('Failed to get remote values from device. Is it still connected?')
         
         # the check_remote_values GUI function requires a lot of GUI updates. It was not possible to update
-        # the self._ui.changed_layout using local qtlock blocks.
-        # Call GUI modifications inmain
-        inmain(self.modify_gui)
+        # the self._ui.changed_layout using local qtlock blocks. Call GUI modifications inmain
+        if auto_update:
+            inmain(self.apply_value_changes)
+        else:
+            inmain(self.handle_value_changes)
     
-    def modify_gui(self):
+    # Simply updates the GUI 
+    def apply_value_changes(self):
+        for channel in sorted(self._last_remote_values):
+            remote_value = self._last_remote_values[channel]
+            if channel not in self._last_programmed_values:
+                raise RuntimeError('The worker function check_remote_values for device %s is returning data for channel %s but the BLACS tab is not programmed to handle this channel'%(self.device_name,channel))
+            
+            if channel in self._AO:
+                front_value = ("%."+str(self._AO[channel]._decimals)+"f")%self._last_programmed_values[channel]
+                remote_value = ("%."+str(self._AO[channel]._decimals)+"f")%remote_value
+                if front_value != remote_value:
+                    output = self.get_channel(channel)
+                    output.set_value(remote_value,program=False)
+            else:
+                raise RuntimeError('device_base_class.py is not programmed to handle channel types other than DDS, AO and DO in check_remote_values')
+
+        self._last_programmed_values = self.get_front_panel_values()
+    
+    # Changes the layout to ask the user if the value was supposed to change
+    def handle_value_changes(self):
         # A variable to indicate if any of the channels have a changed value
         overall_changed = False
             
         # A place to store radio buttons in
         self._changed_radio_buttons = {}
-            
+        
         # Clean up the previously used layout
         while not self._ui.changed_layout.isEmpty():
             item = self._ui.changed_layout.itemAt(0)
