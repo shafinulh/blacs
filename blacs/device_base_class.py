@@ -463,6 +463,13 @@ class DeviceTab(Tab):
         
         raw_results = yield(tasks, True)
         self._last_remote_values = raw_results[0]
+        
+        # If worker function returns False that indicates device is not connected, remove repeated checks for now. 
+        # Once connected, check_remote_values will be rescheduled
+        if self._last_remote_values == False:
+            self.statemachine_timeout_remove(self.check_remote_values) 
+            return
+        
         if self._last_remote_values and len(raw_results) > 1:
             for res in raw_results[1:]:
                 self._last_remote_values.update(res)
