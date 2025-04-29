@@ -619,7 +619,7 @@ class QueueManager(object):
                 error_condition = False
                 abort = False
                 restarted = False
-                # self.set_status("Transitioning to buffered...", path)
+                self.set_status("Transitioning to buffered...", path)
                 
                 # Enable abort button, and link in current_queue:
                 inmain(self._ui.queue_abort_button.clicked.connect,abort_function)
@@ -636,19 +636,32 @@ class QueueManager(object):
 
                 start_time = time.time()
                 
-                # TODO:OPT: opening this h5 file causes a 40-60ms delay depending on your shot length. 
-                # See blacs/performance_hacks for how to get around this.
-                with h5py.File(path, 'r') as hdf5_file:
-                    devices_in_use = {}
-                    start_order = {}
-                    stop_order = {}
-                    for name in  hdf5_file['devices']:
-                        device_properties = labscript_utils.properties.get(
-                            hdf5_file, name, 'device_properties'
-                        )
-                        devices_in_use[name] = self.BLACS.tablist[name]
-                        start_order[name] = device_properties.get('start_order', None)
-                        stop_order[name] = device_properties.get('stop_order', None)
+                # Hack: opening this h5 file causes a >20ms delay. Instead, hard code the device list and ordering
+                # so we don't need to retrieve it each time
+
+                # TODO:OPT: need to find a way to either allow the user to insert the "devices_in_use"
+                # for a sequence of shots or recognize we received a sequence of shots and only read the
+                # device list on the first shot
+                # with h5py.File(path, 'r') as hdf5_file:
+                #     devices_in_use = {}
+                #     start_order = {}
+                #     stop_order = {}
+                #     for name in  hdf5_file['devices']:
+                #         device_properties = labscript_utils.properties.get(
+                #             hdf5_file, name, 'device_properties'
+                #         )
+                #         devices_in_use[name] = self.BLACS.tablist[name]
+                #         start_order[name] = device_properties.get('start_order', None)
+                #         stop_order[name] = device_properties.get('stop_order', None)
+
+                # Note: To use this hack you will need to modify the following block to set the "devices_in_use",
+                # "start_order" and "stop_order" of the shots you are running. This information is stored in the compile h5 file.
+                # It only makes sense to use if all the shots in a queued sequence has the same devices and ordering
+                names = ['ni_6363', 'pb']
+                for name in names:
+                    devices_in_use[name] = self.BLACS.tablist[name]
+                start_order = {'ni_6363': 0, 'pb': 0}
+                stop_order = {'ni_6363': 0, 'pb': 0}
 
                 # Sort the devices into groups based on their start_order and stop_order
                 start_groups = defaultdict(set)
@@ -765,9 +778,9 @@ class QueueManager(object):
                 #                                                             SCIENCE!                                                                   #
                 ##########################################################################################################################################
             
-                # Get front panel data, but don't save it to the h5 file until the experiment ends:
+                # Get front panel data, but don't save it to the h5 file until the experiment ends: 
                 states,tab_positions,window_data,plugin_data = self.BLACS.front_panel_settings.get_save_data()
-                # self.set_status("Running (program time: %.3fs)..."%(time.time() - start_time), path)
+                self.set_status("Running (program time: %.3fs)..."%(time.time() - start_time), path)
                     
                 # A Queue for event-based notification of when the experiment has finished.
                 experiment_finished_queue = queue.Queue()
@@ -1049,6 +1062,6 @@ class QueueManager(object):
                         self._logger.exception('Failed to copy h5_file (%s) for repeat run'%s)
                     logger.info(message)      
 
-            # self.set_status("Idle")
+            self.set_status("Idle")
         logger.info('Stopping')
 
