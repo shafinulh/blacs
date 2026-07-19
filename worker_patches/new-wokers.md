@@ -36,3 +36,11 @@ The PulseBlaster method preserves its existing end-of-shot and wait checks.
 For the last queued shot, BLACS still calls `transition_to_manual()` as part of
 the normal final cleanup. To revert either change, remove only its marked
 `CODEX CHANGE START` through `CODEX CHANGE END` block.
+
+## Temporary timing instrumentation
+
+This branch also contains `blacs/codex_timing.py` and common worker timestamps
+in `blacs/tab_base_classes.py`. The matching PulseBlaster timestamp block is
+installed only in the `labscript-dev` environment. It records the buffered and
+post-shot worker boundaries, plus the software call immediately before and
+after `pb_start()`. The test parser is kept with the isolated test files.
