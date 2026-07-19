@@ -13,7 +13,7 @@ def log_event(logger, event, shot_file=None, **fields):
     payload = {
         "event": event,
         "pid": os.getpid(),
-        "run_id": os.environ.get("BLACS_TIMING_RUN_ID", "unset"),
+        "run_id": os.environ.get("BLACS_TIMING_RUN_ID", "unset").strip(),
         "time_ns": time.time_ns(),
     }
     if shot_file is not None:
