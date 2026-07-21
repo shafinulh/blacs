@@ -959,9 +959,37 @@ class Worker(Process):
         # Convert it to a local path before calling the subclass's
         # transition_to_buffered() method
         h5_file = path_to_local(h5_file)
-        return self.transition_to_buffered(
-            device_name, h5_file, front_panel_values, fresh
+        # CODEX CHANGE START: Record common worker timing boundaries for each shot.
+        from blacs.codex_timing import log_event
+
+        self._codex_timing_h5file = h5_file
+        log_event(
+            self.logger,
+            "worker_buffered_start",
+            h5_file,
+            device=self.device_name,
+            fresh=bool(fresh),
         )
+        try:
+            result = self.transition_to_buffered(
+                device_name, h5_file, front_panel_values, fresh
+            )
+        except Exception:
+            log_event(
+                self.logger,
+                "worker_buffered_error",
+                h5_file,
+                device=self.device_name,
+            )
+            raise
+        log_event(
+            self.logger,
+            "worker_buffered_end",
+            h5_file,
+            device=self.device_name,
+        )
+        return result
+        # CODEX CHANGE END: Record common worker timing boundaries for each shot.
 
     def mainloop(self):
         while True:
@@ -984,7 +1012,27 @@ class Worker(Process):
                 # Try to do the requested work:
                 self.logger.debug('Starting job %s'%funcname)
                 try:
+                    # CODEX CHANGE START: Record common post-shot worker timing.
+                    if funcname in ('post_experiment', 'transition_to_manual'):
+                        from blacs.codex_timing import log_event
+
+                        log_event(
+                            self.logger,
+                            "worker_%s_start" % funcname,
+                            getattr(self, "_codex_timing_h5file", None),
+                            device=self.device_name,
+                        )
+                    # CODEX CHANGE END: Record common post-shot worker timing.
                     results = func(*args,**kwargs)
+                    # CODEX CHANGE START: Record common post-shot worker timing.
+                    if funcname in ('post_experiment', 'transition_to_manual'):
+                        log_event(
+                            self.logger,
+                            "worker_%s_end" % funcname,
+                            getattr(self, "_codex_timing_h5file", None),
+                            device=self.device_name,
+                        )
+                    # CODEX CHANGE END: Record common post-shot worker timing.
                     success = True
                     message = ''
                     self.logger.debug('Job complete')

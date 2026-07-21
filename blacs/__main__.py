@@ -18,7 +18,13 @@ import os
 
 # Associate app windows with OS menu shortcuts:
 import desktop_app
-desktop_app.set_process_appid('blacs')
+# CODEX CHANGE START: Allow PEP 660 editable installs to start on Windows.
+try:
+    desktop_app.set_process_appid('blacs')
+except ModuleNotFoundError:
+    # The desktop shortcut is optional; the BLACS GUI can still start.
+    pass
+# CODEX CHANGE END: Allow PEP 660 editable installs to start on Windows.
 
 
 # Splash screen
